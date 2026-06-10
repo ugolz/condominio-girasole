@@ -1,24 +1,54 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Trash2, CheckCircle, Clock, AlertTriangle } from 'lucide-react'
-import { format, isAfter, isBefore, addDays, differenceInDays } from 'date-fns'
+import { useProfile } from '../context/ProfileContext'
+import { Plus, Trash2, CheckCircle, Clock, AlertTriangle, Receipt } from 'lucide-react'
+import { format, isAfter, isBefore, differenceInDays } from 'date-fns'
 import { it } from 'date-fns/locale'
 
 const CATEGORIE = ['Rate condominiali', 'Assicurazione', 'Revisione ascensore', 'Caldaia', 'Antincendio', 'Bollette', 'Tasse', 'Altro']
 
 export default function Scadenze() {
+  const { unita, loading: profileLoading } = useProfile()
   const [scadenze, setScadenze] = useState([])
+  const [quoteSpese, setQuoteSpese] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadingQuote, setLoadingQuote] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [filtro, setFiltro] = useState('future')
   const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: 'Rate condominiali', data_scadenza: '', importo: '', completata: false })
 
   useEffect(() => { fetchScadenze() }, [])
 
+  useEffect(() => {
+    if (!profileLoading) {
+      if (unita) fetchQuoteSpese()
+      else setLoadingQuote(false)
+    }
+  }, [unita, profileLoading])
+
   const fetchScadenze = async () => {
     const { data } = await supabase.from('scadenze').select('*').order('data_scadenza')
     setScadenze(data || [])
     setLoading(false)
+  }
+
+  const fetchQuoteSpese = async () => {
+    setLoadingQuote(true)
+    const { data } = await supabase
+      .from('quote_spese')
+      .select('*, spese_comuni(titolo, categoria, data_scadenza, importo_totale, note)')
+      .eq('unita', unita)
+      .order('spese_comuni(data_scadenza)')
+    setQuoteSpese(data || [])
+    setLoadingQuote(false)
+  }
+
+  const toggleQuota = async (id, completata) => {
+    await supabase.from('quote_spese').update({
+      completata: !completata,
+      completata_il: !completata ? new Date().toISOString() : null,
+    }).eq('id', id)
+    fetchQuoteSpese()
   }
 
   const handleSubmit = async (e) => {
@@ -126,6 +156,70 @@ export default function Scadenze() {
               </div>
             )
           })
+        )}
+      </div>
+
+      {/* Spese condominiali */}
+      <div className="pt-2 border-t border-stone-200 space-y-3">
+        <div>
+          <h2 className="text-base font-semibold text-stone-700 flex items-center gap-2">
+            <Receipt className="w-4 h-4 text-stone-400" />
+            Spese condominiali
+          </h2>
+          {unita
+            ? <p className="text-stone-400 text-xs mt-0.5">Quote assegnate a {unita}</p>
+            : !profileLoading && <p className="text-stone-400 text-xs mt-0.5">Unità non configurata — contatta l'amministratore</p>
+          }
+        </div>
+
+        {loadingQuote ? (
+          <div className="card p-6 text-center text-stone-400 text-sm">Caricamento...</div>
+        ) : !unita ? null : quoteSpese.length === 0 ? (
+          <div className="card p-8 text-center">
+            <Receipt className="w-7 h-7 text-stone-200 mx-auto mb-2" />
+            <p className="text-stone-400 text-sm">Nessuna spesa condominiale assegnata</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {quoteSpese.map(q => (
+              <div key={q.id} className={`card p-4 flex items-start gap-3 ${q.completata ? 'opacity-60' : ''}`}>
+                <button
+                  onClick={() => toggleQuota(q.id, q.completata)}
+                  className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                    q.completata ? 'bg-sage-500 border-sage-500' : 'border-stone-300 hover:border-sage-400'
+                  }`}
+                >
+                  {q.completata && <CheckCircle className="w-3 h-3 text-white fill-white" />}
+                </button>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start gap-2 flex-wrap">
+                    <span className={`text-sm font-medium ${q.completata ? 'line-through text-stone-400' : 'text-stone-800'}`}>
+                      {q.spese_comuni.titolo}
+                    </span>
+                    <span className="text-xs px-2 py-0.5 rounded bg-stone-100 text-stone-500 font-medium">
+                      {q.spese_comuni.categoria}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-3 mt-1.5 text-xs text-stone-400">
+                    <span>📅 {format(new Date(q.spese_comuni.data_scadenza + 'T00:00:00'), 'd MMMM yyyy', { locale: it })}</span>
+                    <span>
+                      💶 La tua quota:{' '}
+                      <strong className="text-stone-600">
+                        €{Number(q.importo_quota).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                      </strong>
+                      <span className="ml-1">({q.millesimi} millesimi)</span>
+                    </span>
+                  </div>
+                  {q.spese_comuni.note && <p className="text-xs text-stone-400 mt-0.5">{q.spese_comuni.note}</p>}
+                  {q.completata && q.completata_il && (
+                    <p className="text-xs text-sage-500 mt-0.5">
+                      Pagata il {format(new Date(q.completata_il), 'd MMMM yyyy', { locale: it })}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 

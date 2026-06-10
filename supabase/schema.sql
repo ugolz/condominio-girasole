@@ -132,3 +132,114 @@ CREATE POLICY "Upload autenticati" ON storage.objects
 -- Policy storage: eliminazione per chi ha caricato
 CREATE POLICY "Eliminazione propria storage" ON storage.objects
   FOR DELETE TO authenticated USING (bucket_id = 'documenti' AND auth.uid() = owner);
+
+-- ============================================================
+-- SUPERADMIN FEATURE
+-- ============================================================
+
+-- Tabella: Profili utente
+CREATE TABLE IF NOT EXISTS profiles (
+  id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id    UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL UNIQUE,
+  email      TEXT NOT NULL,
+  is_admin   BOOLEAN NOT NULL DEFAULT FALSE,
+  unita      VARCHAR(50),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Tabella: Configurazione millesimi per unità (su 1000)
+CREATE TABLE IF NOT EXISTS millesimi_config (
+  id    UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  unita VARCHAR(50) NOT NULL UNIQUE,
+  valore NUMERIC(7,3) NOT NULL
+);
+
+-- Seed iniziale: 6 unità a quota uguale
+INSERT INTO millesimi_config (unita, valore) VALUES
+  ('Interno 1', 166.667), ('Interno 2', 166.667), ('Interno 3', 166.667),
+  ('Interno 4', 166.667), ('Interno 5', 166.667), ('Interno 6', 166.667)
+ON CONFLICT (unita) DO NOTHING;
+
+-- Tabella: Spese comuni create dall'admin
+CREATE TABLE IF NOT EXISTS spese_comuni (
+  id             UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  titolo         VARCHAR(255) NOT NULL,
+  descrizione    TEXT,
+  categoria      VARCHAR(80) DEFAULT 'Altro',
+  data_scadenza  DATE NOT NULL,
+  importo_totale NUMERIC(10,2) NOT NULL,
+  note           TEXT,
+  user_id        UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Tabella: Quote individuali per unità (una riga per unità per spesa)
+CREATE TABLE IF NOT EXISTS quote_spese (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  spesa_id      UUID REFERENCES spese_comuni(id) ON DELETE CASCADE NOT NULL,
+  unita         VARCHAR(50) NOT NULL,
+  millesimi     NUMERIC(7,3) NOT NULL,
+  importo_quota NUMERIC(10,2) NOT NULL,
+  completata    BOOLEAN NOT NULL DEFAULT FALSE,
+  completata_il TIMESTAMPTZ,
+  UNIQUE(spesa_id, unita)
+);
+
+-- ============================================================
+-- RLS per le nuove tabelle
+-- ============================================================
+
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE millesimi_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE spese_comuni ENABLE ROW LEVEL SECURITY;
+ALTER TABLE quote_spese ENABLE ROW LEVEL SECURITY;
+
+-- PROFILES
+CREATE POLICY "Lettura autenticati" ON profiles FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Aggiornamento admin o proprio" ON profiles FOR UPDATE TO authenticated
+  USING (auth.uid() = user_id OR EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = auth.uid() AND p.is_admin = TRUE));
+
+-- MILLESIMI_CONFIG
+CREATE POLICY "Lettura autenticati" ON millesimi_config FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Modifica solo admin" ON millesimi_config FOR UPDATE TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+CREATE POLICY "Inserimento solo admin" ON millesimi_config FOR INSERT TO authenticated
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+
+-- SPESE_COMUNI
+CREATE POLICY "Lettura autenticati" ON spese_comuni FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Inserimento solo admin" ON spese_comuni FOR INSERT TO authenticated
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+CREATE POLICY "Eliminazione solo admin" ON spese_comuni FOR DELETE TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+
+-- QUOTE_SPESE
+CREATE POLICY "Lettura autenticati" ON quote_spese FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Inserimento solo admin" ON quote_spese FOR INSERT TO authenticated
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+CREATE POLICY "Aggiornamento quota" ON quote_spese FOR UPDATE TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND (is_admin = TRUE OR unita = quote_spese.unita)));
+CREATE POLICY "Eliminazione solo admin" ON quote_spese FOR DELETE TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+
+-- ============================================================
+-- TRIGGER: crea profilo automaticamente all'iscrizione
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  INSERT INTO public.profiles (user_id, email, is_admin, unita)
+  VALUES (NEW.id, NEW.email, FALSE, NULL);
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Per utenti già esistenti (eseguire una volta nel SQL editor di Supabase):
+-- INSERT INTO public.profiles (user_id, email) SELECT id, email FROM auth.users ON CONFLICT (user_id) DO NOTHING;
+-- Promuovere il primo admin:
+-- UPDATE public.profiles SET is_admin = TRUE WHERE email = 'tuaemail@esempio.it';

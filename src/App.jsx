@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { supabase } from './lib/supabase'
+import { ProfileProvider } from './context/ProfileContext'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Calendario from './pages/Calendario'
@@ -8,6 +9,7 @@ import Obblighi from './pages/Obblighi'
 import Scadenze from './pages/Scadenze'
 import Guasti from './pages/Guasti'
 import Verbali from './pages/Verbali'
+import Admin from './pages/Admin'
 import Auth from './pages/Auth'
 
 export default function App() {
@@ -42,13 +44,21 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/auth" element={!session ? <Auth /> : <Navigate to="/" replace />} />
-        <Route path="/" element={session ? <Layout session={session} /> : <Navigate to="/auth" replace />}>
+        <Route
+          path="/"
+          element={
+            session
+              ? <ProfileProvider session={session}><Layout session={session} /></ProfileProvider>
+              : <Navigate to="/auth" replace />
+          }
+        >
           <Route index element={<Dashboard />} />
           <Route path="calendario" element={<Calendario />} />
           <Route path="obblighi" element={<Obblighi />} />
           <Route path="scadenze" element={<Scadenze />} />
           <Route path="guasti" element={<Guasti />} />
           <Route path="verbali" element={<Verbali />} />
+          <Route path="admin" element={<Admin />} />
         </Route>
       </Routes>
     </BrowserRouter>
