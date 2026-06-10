@@ -10,7 +10,6 @@ import {
 } from 'lucide-react'
 import { useConfirm } from '../components/ConfirmDialog'
 
-const UNITA = ['Interno 1', 'Interno 2', 'Interno 3', 'Interno 4', 'Interno 5', 'Interno 6']
 const CATEGORIE = ['Manutenzione', 'Pulizie', 'Assicurazione', 'Utenze', 'Amministrazione', 'Altro']
 const TABS = [
   { id: 'spese', label: 'Spese comuni', icon: Receipt },
@@ -502,15 +501,14 @@ function TabUtenti({ session }) {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Unità / Interno</label>
-                <select
+                <label className="label">Unità</label>
+                <input
+                  type="text"
                   value={edit.unita || ''}
                   onChange={e => setEdits(ed => ({ ...ed, [p.user_id]: { ...getEdit(p), unita: e.target.value || null } }))}
                   className="input"
-                >
-                  <option value="">— Nessuna —</option>
-                  {UNITA.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
+                  placeholder="es. Appartamento 1"
+                />
               </div>
               <div>
                 <label className="label">Ruolo amministratore</label>

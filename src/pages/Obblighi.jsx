@@ -7,21 +7,37 @@ import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmDialog'
 
 const CATEGORIE = ['Pulizie', 'Manutenzione', 'Giardino', 'Parcheggio', 'Altro']
-const UNITA = ['Interno 1', 'Interno 2', 'Interno 3', 'Interno 4', 'Interno 5', 'Interno 6', 'Tutti']
 
 export default function Obblighi() {
   const toast = useToast()
   const confirm = useConfirm()
   const [obblighi, setObblighi] = useState([])
+  const [utenti, setUtenti] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState(null)
   const [submitting, setSubmitting] = useState(false)
-  const [filtro, setFiltro] = useState('tutti') // 'tutti' | 'pendenti' | 'completati'
-  const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: 'Pulizie', assegnato_a: '', ricorrenza: 'mensile', data_inizio: '', data_fine: '' })
+  const [filtro, setFiltro] = useState('tutti')
+  const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: 'Pulizie', assegnato_a: '', data_inizio: '', data_fine: '' })
   const [errore, setErrore] = useState(null)
 
-  useEffect(() => { fetchObblighi() }, [])
+  useEffect(() => {
+    fetchObblighi()
+    fetchUtenti()
+  }, [])
+
+  const fetchUtenti = async () => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('user_id, nome, cognome, email, unita')
+      .order('nome')
+    setUtenti(data || [])
+  }
+
+  const nomeUtente = (u) => {
+    const full = [u.nome, u.cognome].filter(Boolean).join(' ')
+    return full || u.email || u.user_id
+  }
 
   const fetchObblighi = async () => {
     const { data } = await supabase.from('obblighi').select('*').order('completato').order('created_at', { ascending: false })
@@ -29,7 +45,7 @@ export default function Obblighi() {
     setLoading(false)
   }
 
-  const FORM_VUOTO = { titolo: '', descrizione: '', categoria: 'Pulizie', assegnato_a: '', ricorrenza: 'mensile', data_inizio: '', data_fine: '' }
+  const FORM_VUOTO = { titolo: '', descrizione: '', categoria: 'Pulizie', assegnato_a: '', data_inizio: '', data_fine: '' }
 
   const openCreate = () => {
     setEditId(null)
@@ -45,7 +61,6 @@ export default function Obblighi() {
       descrizione: o.descrizione || '',
       categoria: o.categoria,
       assegnato_a: o.assegnato_a || '',
-      ricorrenza: o.ricorrenza,
       data_inizio: o.data_inizio || '',
       data_fine: o.data_fine || '',
     })
@@ -63,6 +78,7 @@ export default function Obblighi() {
       assegnato_a: form.assegnato_a || null,
       data_inizio: form.data_inizio || null,
       data_fine: form.data_fine || null,
+      ricorrenza: form.data_fine ? 'giornaliera' : form.data_inizio ? 'unica' : 'giornaliera',
     }
     const { error } = editId
       ? await supabase.from('obblighi').update(payload).eq('id', editId)
@@ -105,7 +121,6 @@ export default function Obblighi() {
     return true
   })
 
-  const ricorrenzaLabel = { giornaliera: 'Ogni giorno', settimanale: 'Ogni settimana', mensile: 'Ogni mese', trimestrale: 'Ogni trimestre', annuale: 'Annuale', unica: 'Una tantum' }
   const catColors = { Pulizie: 'bg-blue-50 text-blue-700', Manutenzione: 'bg-amber-50 text-amber-700', Giardino: 'bg-sage-50 text-sage-700', Parcheggio: 'bg-stone-100 text-stone-600', Altro: 'bg-purple-50 text-purple-700' }
 
   return (
@@ -150,8 +165,8 @@ export default function Obblighi() {
                 {o.descrizione && <p className="text-xs text-stone-400 mt-0.5 line-clamp-2">{o.descrizione}</p>}
                 <div className="flex flex-wrap gap-3 mt-1.5 text-xs text-stone-400">
                   {o.assegnato_a && <span>📍 {o.assegnato_a}</span>}
-                  <span>🔄 {ricorrenzaLabel[o.ricorrenza]}</span>
                   {o.data_inizio && <span>📅 dal {format(new Date(o.data_inizio + 'T00:00:00'), 'd MMM yyyy', { locale: it })}{o.data_fine ? ` al ${format(new Date(o.data_fine + 'T00:00:00'), 'd MMM yyyy', { locale: it })}` : ''}</span>}
+                  {!o.data_inizio && !o.data_fine && <span className="text-stone-300 italic">Nessuna scadenza</span>}
                   {o.completato_il && <span>✓ {format(new Date(o.completato_il), 'd MMM', { locale: it })}</span>}
                 </div>
               </div>
@@ -198,15 +213,12 @@ export default function Obblighi() {
                   <label className="label">Assegnato a</label>
                   <select value={form.assegnato_a} onChange={e => setForm(f => ({ ...f, assegnato_a: e.target.value }))} className="input">
                     <option value="">—</option>
-                    {UNITA.map(u => <option key={u}>{u}</option>)}
+                    <option value="Tutti">Tutti</option>
+                    {utenti.map(u => (
+                      <option key={u.user_id} value={nomeUtente(u)}>{nomeUtente(u)}</option>
+                    ))}
                   </select>
                 </div>
-              </div>
-              <div>
-                <label className="label">Ricorrenza</label>
-                <select value={form.ricorrenza} onChange={e => setForm(f => ({ ...f, ricorrenza: e.target.value }))} className="input">
-                  {Object.entries({ giornaliera: 'Giornaliera', settimanale: 'Settimanale', mensile: 'Mensile', trimestrale: 'Trimestrale', annuale: 'Annuale', unica: 'Una tantum' }).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
