@@ -8,7 +8,7 @@ import { it } from 'date-fns/locale'
 const CATEGORIE = ['Rate condominiali', 'Assicurazione', 'Revisione ascensore', 'Caldaia', 'Antincendio', 'Bollette', 'Tasse', 'Altro']
 
 export default function Scadenze() {
-  const { unita, loading: profileLoading } = useProfile()
+  const { unita, isAdmin, loading: profileLoading } = useProfile()
   const [scadenze, setScadenze] = useState([])
   const [quoteSpese, setQuoteSpese] = useState([])
   const [loading, setLoading] = useState(true)
@@ -92,9 +92,11 @@ export default function Scadenze() {
           <h1 className="text-xl font-semibold text-stone-800">Scadenze</h1>
           <p className="text-stone-400 text-sm">Rate, revisioni e pagamenti condominiali</p>
         </div>
-        <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2">
-          <Plus className="w-4 h-4" /> Nuova scadenza
-        </button>
+        {isAdmin && (
+          <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2">
+            <Plus className="w-4 h-4" /> Nuova scadenza
+          </button>
+        )}
       </div>
 
       {/* Summary bar */}
@@ -149,9 +151,11 @@ export default function Scadenze() {
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {status.cls && <span className={status.cls}>{status.label}</span>}
-                  <button onClick={() => handleDelete(s.id)} className="p-1.5 text-stone-300 hover:text-red-400 transition-colors">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {isAdmin && (
+                    <button onClick={() => handleDelete(s.id)} className="p-1.5 text-stone-300 hover:text-red-400 transition-colors">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             )
@@ -223,8 +227,8 @@ export default function Scadenze() {
         )}
       </div>
 
-      {/* Modal */}
-      {showForm && (
+      {/* Modal (solo admin) */}
+      {showForm && isAdmin && (
         <div className="fixed inset-0 bg-stone-900/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
             <h3 className="font-semibold text-stone-800 mb-4">Nuova scadenza</h3>

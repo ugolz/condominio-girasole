@@ -87,10 +87,11 @@ CREATE POLICY "Lettura autenticati" ON scadenze FOR SELECT TO authenticated USIN
 CREATE POLICY "Lettura autenticati" ON guasti FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Lettura autenticati" ON verbali FOR SELECT TO authenticated USING (true);
 
--- Policy: tutti gli autenticati possono inserire
+-- Policy: tutti gli autenticati possono inserire (eccetto scadenze: solo admin)
 CREATE POLICY "Inserimento autenticati" ON disponibilita_assemblee FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY "Inserimento autenticati" ON obblighi FOR INSERT TO authenticated WITH CHECK (true);
-CREATE POLICY "Inserimento autenticati" ON scadenze FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Inserimento solo admin" ON scadenze FOR INSERT TO authenticated
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
 CREATE POLICY "Inserimento autenticati" ON guasti FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY "Inserimento autenticati" ON verbali FOR INSERT TO authenticated WITH CHECK (true);
 
@@ -101,10 +102,11 @@ CREATE POLICY "Aggiornamento autenticati" ON scadenze FOR UPDATE TO authenticate
 CREATE POLICY "Aggiornamento autenticati" ON guasti FOR UPDATE TO authenticated USING (true);
 CREATE POLICY "Aggiornamento autenticati" ON verbali FOR UPDATE TO authenticated USING (true);
 
--- Policy: solo chi ha creato può eliminare
+-- Policy: solo chi ha creato può eliminare (scadenze: solo admin)
 CREATE POLICY "Eliminazione propria" ON disponibilita_assemblee FOR DELETE TO authenticated USING (auth.uid() = user_id OR user_id IS NULL);
 CREATE POLICY "Eliminazione propria" ON obblighi FOR DELETE TO authenticated USING (auth.uid() = user_id OR user_id IS NULL);
-CREATE POLICY "Eliminazione propria" ON scadenze FOR DELETE TO authenticated USING (auth.uid() = user_id OR user_id IS NULL);
+CREATE POLICY "Eliminazione solo admin" ON scadenze FOR DELETE TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
 CREATE POLICY "Eliminazione propria" ON guasti FOR DELETE TO authenticated USING (auth.uid() = user_id OR user_id IS NULL);
 CREATE POLICY "Eliminazione propria" ON verbali FOR DELETE TO authenticated USING (auth.uid() = user_id OR user_id IS NULL);
 

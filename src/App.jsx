@@ -10,6 +10,7 @@ import Scadenze from './pages/Scadenze'
 import Guasti from './pages/Guasti'
 import Verbali from './pages/Verbali'
 import Admin from './pages/Admin'
+import Impostazioni from './pages/Impostazioni'
 import Auth from './pages/Auth'
 
 export default function App() {
@@ -59,6 +60,7 @@ export default function App() {
           <Route path="guasti" element={<Guasti />} />
           <Route path="verbali" element={<Verbali />} />
           <Route path="admin" element={<Admin />} />
+          <Route path="impostazioni" element={<Impostazioni />} />
         </Route>
       </Routes>
     </BrowserRouter>

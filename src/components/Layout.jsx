@@ -13,7 +13,8 @@ import {
   Building2,
   Menu,
   X,
-  ShieldCheck
+  ShieldCheck,
+  Settings
 } from 'lucide-react'
 
 const navItems = [
@@ -93,6 +94,20 @@ export default function Layout({ session }) {
 
       {/* User */}
       <div className="px-3 pb-4 border-t border-stone-100 pt-3">
+        <NavLink
+          to="/impostazioni"
+          onClick={() => setMobileOpen(false)}
+          className={({ isActive }) =>
+            `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors mb-1 ${
+              isActive
+                ? 'bg-terracotta-50 text-terracotta-700'
+                : 'text-stone-500 hover:bg-stone-100 hover:text-stone-700'
+            }`
+          }
+        >
+          <Settings className="w-4 h-4 flex-shrink-0" />
+          Impostazioni
+        </NavLink>
         <div className="flex items-center gap-2 px-3 py-2 mb-1">
           <div className="w-7 h-7 bg-stone-200 rounded-full flex items-center justify-center flex-shrink-0">
             <span className="text-xs font-semibold text-stone-600 uppercase">{userName[0]}</span>
