@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Check, Trash2, RotateCcw, ClipboardList } from 'lucide-react'
+import { Plus, Check, Trash2, RotateCcw, ClipboardList, Pencil } from 'lucide-react'
 import { format } from 'date-fns'
 import { it } from 'date-fns/locale'
 import { useToast } from '../components/Toast'
@@ -15,6 +15,7 @@ export default function Obblighi() {
   const [obblighi, setObblighi] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [editId, setEditId] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [filtro, setFiltro] = useState('tutti') // 'tutti' | 'pendenti' | 'completati'
   const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: 'Pulizie', assegnato_a: '', ricorrenza: 'mensile', data_inizio: '', data_fine: '' })
@@ -30,6 +31,28 @@ export default function Obblighi() {
 
   const FORM_VUOTO = { titolo: '', descrizione: '', categoria: 'Pulizie', assegnato_a: '', ricorrenza: 'mensile', data_inizio: '', data_fine: '' }
 
+  const openCreate = () => {
+    setEditId(null)
+    setForm(FORM_VUOTO)
+    setErrore(null)
+    setShowForm(true)
+  }
+
+  const openEdit = (o) => {
+    setEditId(o.id)
+    setForm({
+      titolo: o.titolo,
+      descrizione: o.descrizione || '',
+      categoria: o.categoria,
+      assegnato_a: o.assegnato_a || '',
+      ricorrenza: o.ricorrenza,
+      data_inizio: o.data_inizio || '',
+      data_fine: o.data_fine || '',
+    })
+    setErrore(null)
+    setShowForm(true)
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (submitting) return
@@ -40,17 +63,19 @@ export default function Obblighi() {
       assegnato_a: form.assegnato_a || null,
       data_inizio: form.data_inizio || null,
       data_fine: form.data_fine || null,
-      completato: false,
     }
-    const { error } = await supabase.from('obblighi').insert(payload)
+    const { error } = editId
+      ? await supabase.from('obblighi').update(payload).eq('id', editId)
+      : await supabase.from('obblighi').insert({ ...payload, completato: false })
     if (error) {
       setErrore(error.message)
       toast.error('Errore durante il salvataggio.')
     } else {
       setShowForm(false)
+      setEditId(null)
       setForm(FORM_VUOTO)
       fetchObblighi()
-      toast.success('Obbligo aggiunto.')
+      toast.success(editId ? 'Obbligo aggiornato.' : 'Obbligo aggiunto.')
     }
     setSubmitting(false)
   }
@@ -84,13 +109,13 @@ export default function Obblighi() {
   const catColors = { Pulizie: 'bg-blue-50 text-blue-700', Manutenzione: 'bg-amber-50 text-amber-700', Giardino: 'bg-sage-50 text-sage-700', Parcheggio: 'bg-stone-100 text-stone-600', Altro: 'bg-purple-50 text-purple-700' }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
+    <div className="max-w-5xl mx-auto space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-stone-800">Obblighi comuni</h1>
           <p className="text-stone-400 text-sm">Turni, pulizie e manutenzioni condivise</p>
         </div>
-        <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2">
+        <button onClick={openCreate} className="btn-primary flex items-center gap-2">
           <Plus className="w-4 h-4" /> Nuovo obbligo
         </button>
       </div>
@@ -136,6 +161,9 @@ export default function Obblighi() {
                     <RotateCcw className="w-3.5 h-3.5" />
                   </button>
                 )}
+                <button onClick={() => openEdit(o)} className="p-1.5 text-stone-300 hover:text-stone-600 transition-colors" title="Modifica">
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
                 <button onClick={() => handleDelete(o.id)} className="p-1.5 text-stone-300 hover:text-red-400 transition-colors">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -149,7 +177,7 @@ export default function Obblighi() {
       {showForm && (
         <div className="fixed inset-0 bg-stone-900/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="font-semibold text-stone-800 mb-4">Nuovo obbligo comune</h3>
+            <h3 className="font-semibold text-stone-800 mb-4">{editId ? 'Modifica obbligo' : 'Nuovo obbligo comune'}</h3>
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>
                 <label className="label">Titolo *</label>
@@ -194,7 +222,7 @@ export default function Obblighi() {
                 <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{errore}</p>
               )}
               <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => { setShowForm(false); setErrore(null) }} disabled={submitting} className="btn-secondary flex-1">Annulla</button>
+                <button type="button" onClick={() => { setShowForm(false); setEditId(null); setErrore(null) }} disabled={submitting} className="btn-secondary flex-1">Annulla</button>
                 <button type="submit" disabled={submitting} className="btn-primary flex-1 flex items-center justify-center gap-2">
                   {submitting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                   {submitting ? 'Salvataggio...' : 'Salva'}

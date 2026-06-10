@@ -1,20 +1,20 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Trash2, Wrench, CheckCircle, AlertTriangle, Clock } from 'lucide-react'
+import { Plus, Trash2, Wrench, CheckCircle, AlertTriangle, Clock, Pencil } from 'lucide-react'
 import { format } from 'date-fns'
 import { it } from 'date-fns/locale'
 import { useConfirm } from '../components/ConfirmDialog'
 
 const CATEGORIE = ['Ascensore', 'Impianto elettrico', 'Idraulica', 'Riscaldamento', 'Tetto/Copertura', 'Scale comuni', 'Cancello/Portone', 'Illuminazione', 'Altro']
-const UNITA = ['Interno 1', 'Interno 2', 'Interno 3', 'Interno 4', 'Interno 5', 'Interno 6', 'Parti comuni']
 
 export default function Guasti() {
   const confirm = useConfirm()
   const [guasti, setGuasti] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [editId, setEditId] = useState(null)
   const [filtro, setFiltro] = useState('aperti')
-  const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: 'Altro', priorita: 'media', unita: '', stato: 'aperto' })
+  const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: 'Altro', priorita: 'media', stato: 'aperto' })
 
   useEffect(() => { fetchGuasti() }, [])
 
@@ -24,11 +24,30 @@ export default function Guasti() {
     setLoading(false)
   }
 
+  const FORM_VUOTO = { titolo: '', descrizione: '', categoria: 'Altro', priorita: 'media', stato: 'aperto' }
+
+  const openCreate = () => {
+    setEditId(null)
+    setForm(FORM_VUOTO)
+    setShowForm(true)
+  }
+
+  const openEdit = (g) => {
+    setEditId(g.id)
+    setForm({ titolo: g.titolo, descrizione: g.descrizione || '', categoria: g.categoria, priorita: g.priorita, stato: g.stato })
+    setShowForm(true)
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
-    const { data: { user } } = await supabase.auth.getUser()
-    const { error } = await supabase.from('guasti').insert({ ...form, user_id: user?.id })
-    if (!error) { setShowForm(false); setForm({ titolo: '', descrizione: '', categoria: 'Altro', priorita: 'media', unita: '', stato: 'aperto' }); fetchGuasti() }
+    if (editId) {
+      const { error } = await supabase.from('guasti').update(form).eq('id', editId)
+      if (!error) { setShowForm(false); setEditId(null); fetchGuasti() }
+    } else {
+      const { data: { user } } = await supabase.auth.getUser()
+      const { error } = await supabase.from('guasti').insert({ ...form, user_id: user?.id })
+      if (!error) { setShowForm(false); setForm(FORM_VUOTO); fetchGuasti() }
+    }
   }
 
   const updateStato = async (id, stato) => {
@@ -62,13 +81,13 @@ export default function Guasti() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
+    <div className="max-w-5xl mx-auto space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-stone-800">Segnalazioni guasti</h1>
           <p className="text-stone-400 text-sm">Ticketing per problemi e riparazioni</p>
         </div>
-        <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2">
+        <button onClick={openCreate} className="btn-primary flex items-center gap-2">
           <Plus className="w-4 h-4" /> Segnala guasto
         </button>
       </div>
@@ -118,15 +137,19 @@ export default function Guasti() {
                     </div>
                     {g.descrizione && <p className="text-sm text-stone-500 mt-1">{g.descrizione}</p>}
                     <div className="flex flex-wrap gap-3 mt-2 text-xs text-stone-400">
-                      <span>🏠 {g.unita || 'Non specificato'}</span>
                       <span>📂 {g.categoria}</span>
                       <span>📅 {format(new Date(g.created_at), 'd MMM yyyy', { locale: it })}</span>
                       {g.risolto_il && <span>✓ Risolto: {format(new Date(g.risolto_il), 'd MMM', { locale: it })}</span>}
                     </div>
                   </div>
-                  <button onClick={() => handleDelete(g.id)} className="p-1.5 text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="flex gap-1 flex-shrink-0">
+                    <button onClick={() => openEdit(g)} className="p-1.5 text-stone-300 hover:text-stone-600 transition-colors" title="Modifica">
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => handleDelete(g.id)} className="p-1.5 text-stone-300 hover:text-red-400 transition-colors" title="Elimina">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* State actions */}
@@ -152,7 +175,7 @@ export default function Guasti() {
       {showForm && (
         <div className="fixed inset-0 bg-stone-900/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-            <h3 className="font-semibold text-stone-800 mb-4">Nuova segnalazione guasto</h3>
+            <h3 className="font-semibold text-stone-800 mb-4">{editId ? 'Modifica segnalazione' : 'Nuova segnalazione guasto'}</h3>
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>
                 <label className="label">Titolo *</label>
@@ -178,16 +201,9 @@ export default function Guasti() {
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="label">Posizione / Unità</label>
-                <select value={form.unita} onChange={e => setForm(f => ({ ...f, unita: e.target.value }))} className="input">
-                  <option value="">Seleziona...</option>
-                  {UNITA.map(u => <option key={u}>{u}</option>)}
-                </select>
-              </div>
               <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowForm(false)} className="btn-secondary flex-1">Annulla</button>
-                <button type="submit" className="btn-primary flex-1">Invia segnalazione</button>
+                <button type="button" onClick={() => { setShowForm(false); setEditId(null) }} className="btn-secondary flex-1">Annulla</button>
+                <button type="submit" className="btn-primary flex-1">{editId ? 'Salva modifiche' : 'Invia segnalazione'}</button>
               </div>
             </form>
           </div>

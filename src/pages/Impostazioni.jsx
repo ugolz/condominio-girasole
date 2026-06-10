@@ -81,7 +81,7 @@ export default function Impostazioni() {
   }
 
   return (
-    <div className="max-w-xl mx-auto space-y-5">
+    <div className="max-w-2xl mx-auto space-y-5">
       <div>
         <h1 className="text-xl font-semibold text-stone-800">Impostazioni</h1>
         <p className="text-stone-400 text-sm">Gestisci il tuo profilo e le credenziali di accesso</p>

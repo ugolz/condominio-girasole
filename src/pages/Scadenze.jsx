@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useProfile } from '../context/ProfileContext'
-import { Plus, Trash2, CheckCircle, Clock, AlertTriangle, Receipt } from 'lucide-react'
+import { Plus, Trash2, CheckCircle, Clock, AlertTriangle, Receipt, Pencil } from 'lucide-react'
 import { format, isAfter, isBefore, differenceInDays } from 'date-fns'
 import { it } from 'date-fns/locale'
 import { useToast } from '../components/Toast'
@@ -19,6 +19,7 @@ export default function Scadenze() {
   const [loading, setLoading] = useState(true)
   const [loadingQuote, setLoadingQuote] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [editId, setEditId] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [filtro, setFiltro] = useState('future')
   const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: 'Rate condominiali', data_scadenza: '', importo: '', completata: false })
@@ -70,18 +71,43 @@ export default function Scadenze() {
     fetchQuoteSpese()
   }
 
+  const FORM_VUOTO = { titolo: '', descrizione: '', categoria: 'Rate condominiali', data_scadenza: '', importo: '', completata: false }
+
+  const openCreate = () => {
+    setEditId(null)
+    setForm(FORM_VUOTO)
+    setShowForm(true)
+  }
+
+  const openEdit = (s) => {
+    setEditId(s.id)
+    setForm({
+      titolo: s.titolo,
+      descrizione: s.descrizione || '',
+      categoria: s.categoria,
+      data_scadenza: s.data_scadenza,
+      importo: s.importo != null ? String(s.importo) : '',
+      completata: s.completata,
+    })
+    setShowForm(true)
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (submitting) return
     setSubmitting(true)
-    const { error } = await supabase.from('scadenze').insert({ ...form, importo: form.importo ? parseFloat(form.importo) : null })
+    const payload = { ...form, importo: form.importo ? parseFloat(form.importo) : null }
+    const { error } = editId
+      ? await supabase.from('scadenze').update(payload).eq('id', editId)
+      : await supabase.from('scadenze').insert(payload)
     if (error) {
       toast.error('Errore durante il salvataggio.')
     } else {
       setShowForm(false)
-      setForm({ titolo: '', descrizione: '', categoria: 'Rate condominiali', data_scadenza: '', importo: '', completata: false })
+      setEditId(null)
+      setForm(FORM_VUOTO)
       fetchScadenze()
-      toast.success('Scadenza aggiunta.')
+      toast.success(editId ? 'Scadenza aggiornata.' : 'Scadenza aggiunta.')
     }
     setSubmitting(false)
   }
@@ -125,14 +151,14 @@ export default function Scadenze() {
   })
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
+    <div className="max-w-5xl mx-auto space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-stone-800">Scadenze</h1>
+          <h1 className="text-xl font-semibold text-stone-800">Pagamenti</h1>
           <p className="text-stone-400 text-sm">Rate, revisioni e pagamenti condominiali</p>
         </div>
         {isAdmin && (
-          <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2">
+          <button onClick={openCreate} className="btn-primary flex items-center gap-2">
             <Plus className="w-4 h-4" /> Nuova scadenza
           </button>
         )}
@@ -197,9 +223,14 @@ export default function Scadenze() {
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {status.cls && <span className={status.cls}>{status.label}</span>}
                   {isAdmin && (
-                    <button onClick={() => handleDelete(s.id)} className="p-1.5 text-stone-300 hover:text-red-400 transition-colors">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex gap-1">
+                      <button onClick={() => openEdit(s)} className="p-1.5 text-stone-300 hover:text-stone-600 transition-colors" title="Modifica">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => handleDelete(s.id)} className="p-1.5 text-stone-300 hover:text-red-400 transition-colors" title="Elimina">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -276,7 +307,7 @@ export default function Scadenze() {
       {showForm && isAdmin && (
         <div className="fixed inset-0 bg-stone-900/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-            <h3 className="font-semibold text-stone-800 mb-4">Nuova scadenza</h3>
+            <h3 className="font-semibold text-stone-800 mb-4">{editId ? 'Modifica scadenza' : 'Nuova scadenza'}</h3>
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>
                 <label className="label">Titolo *</label>
@@ -303,10 +334,10 @@ export default function Scadenze() {
                 <textarea value={form.descrizione} onChange={e => setForm(f => ({ ...f, descrizione: e.target.value }))} className="input h-16 resize-none" />
               </div>
               <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowForm(false)} disabled={submitting} className="btn-secondary flex-1">Annulla</button>
+                <button type="button" onClick={() => { setShowForm(false); setEditId(null) }} disabled={submitting} className="btn-secondary flex-1">Annulla</button>
                 <button type="submit" disabled={submitting} className="btn-primary flex-1 flex items-center justify-center gap-2">
                   {submitting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                  {submitting ? 'Salvataggio...' : 'Salva'}
+                  {submitting ? 'Salvataggio...' : editId ? 'Salva modifiche' : 'Salva'}
                 </button>
               </div>
             </form>

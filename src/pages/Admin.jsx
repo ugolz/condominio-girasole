@@ -6,7 +6,7 @@ import { format } from 'date-fns'
 import { it } from 'date-fns/locale'
 import {
   ShieldCheck, Plus, Trash2, Save, Receipt, BarChart2, Users,
-  CheckCircle, XCircle, AlertTriangle
+  CheckCircle, XCircle, AlertTriangle, Pencil
 } from 'lucide-react'
 import { useConfirm } from '../components/ConfirmDialog'
 
@@ -32,6 +32,7 @@ function TabSpese({ session }) {
   const [millesimi, setMillesimi] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [editSpesa, setEditSpesa] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState({
     titolo: '', descrizione: '', categoria: 'Manutenzione',
@@ -53,9 +54,28 @@ function TabSpese({ session }) {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  const openForm = () => {
+  const openCreate = () => {
+    setEditSpesa(null)
     setQuoteConfig(millesimi.map(m => ({ unita: m.unita, millesimi: String(m.valore), inclusa: true })))
     setForm({ titolo: '', descrizione: '', categoria: 'Manutenzione', data_scadenza: '', importo_totale: '', note: '' })
+    setShowForm(true)
+  }
+
+  const openEdit = (spesa) => {
+    setEditSpesa(spesa)
+    setForm({
+      titolo: spesa.titolo,
+      descrizione: spesa.descrizione || '',
+      categoria: spesa.categoria,
+      data_scadenza: spesa.data_scadenza,
+      importo_totale: String(spesa.importo_totale),
+      note: spesa.note || '',
+    })
+    const existingQuote = spesa.quote_spese || []
+    setQuoteConfig(millesimi.map(m => {
+      const ex = existingQuote.find(q => q.unita === m.unita)
+      return { unita: m.unita, millesimi: ex ? String(ex.millesimi) : String(m.valore), inclusa: !!ex }
+    }))
     setShowForm(true)
   }
 
@@ -75,30 +95,69 @@ function TabSpese({ session }) {
     const incluse = quoteConfig.filter(q => q.inclusa)
     if (incluse.length === 0) return
     setSubmitting(true)
-    const { data: spesa, error } = await supabase
-      .from('spese_comuni')
-      .insert({
+
+    if (editSpesa) {
+      const { error } = await supabase.from('spese_comuni').update({
         titolo: form.titolo,
         descrizione: form.descrizione || null,
         categoria: form.categoria,
         data_scadenza: form.data_scadenza,
         importo_totale: importo,
         note: form.note || null,
-        user_id: session?.user?.id,
-      })
-      .select()
-      .single()
+      }).eq('id', editSpesa.id)
 
-    if (!error && spesa) {
-      const quote = incluse.map(q => ({
-        spesa_id: spesa.id,
-        unita: q.unita,
-        millesimi: parseFloat(q.millesimi) || 0,
-        importo_quota: calcQuota(form.importo_totale, q.millesimi),
-      }))
-      await supabase.from('quote_spese').insert(quote)
-      setShowForm(false)
-      fetchAll()
+      if (!error) {
+        const existingQuote = editSpesa.quote_spese || []
+        const toInsert = incluse.filter(q => !existingQuote.find(e => e.unita === q.unita))
+        const toUpdate = incluse.filter(q => existingQuote.find(e => e.unita === q.unita))
+        const toDelete = existingQuote.filter(e => !incluse.find(q => q.unita === e.unita))
+
+        if (toInsert.length > 0) {
+          await supabase.from('quote_spese').insert(toInsert.map(q => ({
+            spesa_id: editSpesa.id,
+            unita: q.unita,
+            millesimi: parseFloat(q.millesimi) || 0,
+            importo_quota: calcQuota(form.importo_totale, q.millesimi),
+          })))
+        }
+        for (const q of toUpdate) {
+          await supabase.from('quote_spese')
+            .update({ millesimi: parseFloat(q.millesimi) || 0, importo_quota: calcQuota(form.importo_totale, q.millesimi) })
+            .eq('spesa_id', editSpesa.id).eq('unita', q.unita)
+        }
+        for (const q of toDelete) {
+          await supabase.from('quote_spese').delete().eq('spesa_id', editSpesa.id).eq('unita', q.unita)
+        }
+        setShowForm(false)
+        setEditSpesa(null)
+        fetchAll()
+      }
+    } else {
+      const { data: spesa, error } = await supabase
+        .from('spese_comuni')
+        .insert({
+          titolo: form.titolo,
+          descrizione: form.descrizione || null,
+          categoria: form.categoria,
+          data_scadenza: form.data_scadenza,
+          importo_totale: importo,
+          note: form.note || null,
+          user_id: session?.user?.id,
+        })
+        .select()
+        .single()
+
+      if (!error && spesa) {
+        const quote = incluse.map(q => ({
+          spesa_id: spesa.id,
+          unita: q.unita,
+          millesimi: parseFloat(q.millesimi) || 0,
+          importo_quota: calcQuota(form.importo_totale, q.millesimi),
+        }))
+        await supabase.from('quote_spese').insert(quote)
+        setShowForm(false)
+        fetchAll()
+      }
     }
     setSubmitting(false)
   }
@@ -120,7 +179,7 @@ function TabSpese({ session }) {
       <div className="flex items-center justify-between">
         <p className="text-stone-500 text-sm">{spese.length} spese registrate</p>
         <button
-          onClick={openForm}
+          onClick={openCreate}
           disabled={millesimi.length === 0}
           title={millesimi.length === 0 ? 'Configura prima i millesimi' : undefined}
           className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -161,9 +220,14 @@ function TabSpese({ session }) {
                 </div>
                 {spesa.note && <p className="text-xs text-stone-400 mt-0.5">{spesa.note}</p>}
               </div>
-              <button onClick={() => handleDelete(spesa)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0 mt-0.5">
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <div className="flex gap-1 flex-shrink-0 mt-0.5">
+                <button onClick={() => openEdit(spesa)} className="p-1 text-stone-300 hover:text-stone-600 transition-colors" title="Modifica">
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => handleDelete(spesa)} className="p-1 text-stone-300 hover:text-red-400 transition-colors" title="Elimina">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
             <div className="flex flex-wrap gap-1.5 pt-1 border-t border-stone-100">
               {quote.map(q => (
@@ -183,7 +247,7 @@ function TabSpese({ session }) {
       {showForm && (
         <div className="fixed inset-0 bg-stone-900/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="font-semibold text-stone-800 mb-4">Nuova spesa comune</h3>
+            <h3 className="font-semibold text-stone-800 mb-4">{editSpesa ? 'Modifica spesa' : 'Nuova spesa comune'}</h3>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="label">Titolo</label>
@@ -270,14 +334,14 @@ function TabSpese({ session }) {
               )}
 
               <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowForm(false)} className="btn-secondary flex-1">Annulla</button>
+                <button type="button" onClick={() => { setShowForm(false); setEditSpesa(null) }} className="btn-secondary flex-1">Annulla</button>
                 <button
                   type="submit"
                   disabled={submitting || quoteConfig.filter(q => q.inclusa).length === 0}
                   className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {submitting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                  Crea spesa
+                  {editSpesa ? 'Salva modifiche' : 'Crea spesa'}
                 </button>
               </div>
             </form>
@@ -516,7 +580,7 @@ export default function Admin({ session: sessionProp }) {
   if (!isAdmin) return null
 
   return (
-    <div className="max-w-4xl mx-auto space-y-5">
+    <div className="max-w-6xl mx-auto space-y-5">
       <div className="flex items-center gap-3">
         <div className="w-9 h-9 bg-terracotta-50 rounded-lg flex items-center justify-center">
           <ShieldCheck className="w-5 h-5 text-terracotta-600" />

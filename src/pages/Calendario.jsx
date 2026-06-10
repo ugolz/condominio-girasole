@@ -6,7 +6,8 @@ import {
   addDays, getDate, getMonth, isAfter, isBefore,
 } from 'date-fns'
 import { it } from 'date-fns/locale'
-import { ChevronLeft, ChevronRight, Plus, Trash2, Users, CheckCircle, Calendar, ClipboardList } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Trash2, Users, CheckCircle, Calendar, ClipboardList, Check } from 'lucide-react'
+import { useProfile } from '../context/ProfileContext'
 
 const UNITA = ['Interno 1', 'Interno 2', 'Interno 3', 'Interno 4', 'Interno 5', 'Interno 6']
 
@@ -66,6 +67,7 @@ function getObbligoOccurrences(obbligo, month) {
 }
 
 export default function Calendario() {
+  const { isAdmin } = useProfile()
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [disponibilita, setDisponibilita] = useState([])
   const [obblighi, setObblighi] = useState([])
@@ -135,10 +137,25 @@ export default function Calendario() {
     fetchDisponibilita()
   }
 
+  const handleApprova = async (disp) => {
+    const { error } = await supabase
+      .from('disponibilita_assemblee')
+      .update({ approvata: true })
+      .eq('id', disp.id)
+    if (!error && disp.user_id) {
+      await supabase.from('notifiche').insert({
+        user_id: disp.user_id,
+        titolo: 'Disponibilità approvata ✓',
+        messaggio: `La tua disponibilità per il ${format(parseISO(disp.data), 'd MMMM yyyy', { locale: it })} alle ${disp.ora} è stata approvata dall'amministratore.`,
+      })
+    }
+    fetchDisponibilita()
+  }
+
   const weekDays = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom']
 
   return (
-    <div className="max-w-4xl mx-auto space-y-5">
+    <div className="max-w-6xl mx-auto space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-stone-800">Calendario</h1>
@@ -170,35 +187,53 @@ export default function Calendario() {
             </button>
           </div>
 
-          <div className="grid grid-cols-7 gap-0.5">
+          <div className="grid grid-cols-7 gap-1">
             {weekDays.map(d => (
               <div key={d} className="text-center text-xs font-medium text-stone-400 py-2">{d}</div>
             ))}
-            {Array(firstDayOfWeek).fill(null).map((_, i) => <div key={`empty-${i}`} />)}
+            {Array(firstDayOfWeek).fill(null).map((_, i) => <div key={`empty-${i}`} className="min-h-[5rem]" />)}
             {days.map(day => {
               const disp = dispForDay(day)
               const obbli = obbligiForDay(day)
               const isSelected = selectedDay && isSameDay(day, selectedDay)
+              const isCurrentDay = isToday(day)
+              const allEvents = [
+                ...disp.map(d => ({ type: 'disp', label: d.unita || d.ora, key: d.id })),
+                ...obbli.map(o => ({ type: 'obbligo', label: o.titolo, key: o.id })),
+              ]
+              const visible = allEvents.slice(0, 2)
+              const extra = allEvents.length - visible.length
               return (
                 <button
                   key={day.toISOString()}
                   onClick={() => handleDayClick(day)}
-                  className={`relative aspect-square flex flex-col items-center justify-center rounded-lg text-sm transition-colors
-                    ${isToday(day) ? 'ring-2 ring-terracotta-400' : ''}
-                    ${isSelected ? 'bg-terracotta-500 text-white' : 'hover:bg-stone-100 text-stone-700'}
+                  className={`relative flex flex-col rounded-lg p-1.5 transition-colors min-h-[5rem] text-left w-full
+                    ${isSelected ? 'bg-terracotta-500' : 'hover:bg-stone-100'}
+                    ${isCurrentDay && !isSelected ? 'ring-2 ring-inset ring-terracotta-400' : ''}
                   `}
                 >
-                  <span className="text-xs font-medium">{format(day, 'd')}</span>
-                  {(disp.length > 0 || obbli.length > 0) && (
-                    <div className="flex gap-0.5 mt-0.5 flex-wrap justify-center max-w-full">
-                      {disp.slice(0, 2).map((_, i) => (
-                        <div key={`d${i}`} className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white' : 'bg-terracotta-400'}`} />
-                      ))}
-                      {obbli.slice(0, 2).map((_, i) => (
-                        <div key={`o${i}`} className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white/70' : 'bg-sage-500'}`} />
-                      ))}
-                    </div>
-                  )}
+                  <span className={`text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full mb-1 flex-shrink-0
+                    ${isSelected ? 'text-white' : isCurrentDay ? 'bg-terracotta-500 text-white' : 'text-stone-600'}
+                  `}>
+                    {format(day, 'd')}
+                  </span>
+                  <div className="flex flex-col gap-0.5 w-full overflow-hidden">
+                    {visible.map((ev, i) => (
+                      <span key={i} className={`text-[10px] font-medium px-1 py-0.5 rounded truncate leading-tight block
+                        ${ev.type === 'disp'
+                          ? isSelected ? 'bg-white/25 text-white' : 'bg-terracotta-100 text-terracotta-700'
+                          : isSelected ? 'bg-white/20 text-white' : 'bg-sage-100 text-sage-700'
+                        }
+                      `}>
+                        {ev.label}
+                      </span>
+                    ))}
+                    {extra > 0 && (
+                      <span className={`text-[9px] font-medium pl-0.5 ${isSelected ? 'text-white/70' : 'text-stone-400'}`}>
+                        +{extra} altri
+                      </span>
+                    )}
+                  </div>
                 </button>
               )
             })}
@@ -223,17 +258,38 @@ export default function Calendario() {
                     <p className="text-stone-400 text-xs">Nessuna segnata</p>
                   ) : (
                     dispForDay(selectedDay).map(d => (
-                      <div key={d.id} className="flex items-start justify-between gap-2 p-2.5 bg-terracotta-50 rounded-lg">
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <Users className="w-3.5 h-3.5 text-terracotta-500" />
-                            <span className="text-xs font-semibold text-terracotta-700">{d.unita}</span>
+                      <div key={d.id} className={`p-2.5 rounded-lg border ${d.approvata ? 'bg-sage-50 border-sage-200' : 'bg-terracotta-50 border-terracotta-100'}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <Users className={`w-3.5 h-3.5 flex-shrink-0 ${d.approvata ? 'text-sage-600' : 'text-terracotta-500'}`} />
+                              <span className={`text-xs font-semibold truncate ${d.approvata ? 'text-sage-700' : 'text-terracotta-700'}`}>{d.unita}</span>
+                            </div>
+                            <p className="text-xs text-stone-500 mt-0.5">{d.ora}{d.note && ` · ${d.note}`}</p>
                           </div>
-                          <p className="text-xs text-stone-500 mt-0.5">{d.ora}{d.note && ` · ${d.note}`}</p>
+                          <button onClick={() => handleDelete(d.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                        <button onClick={() => handleDelete(d.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center justify-between mt-2">
+                          {d.approvata ? (
+                            <span className="flex items-center gap-1 text-[10px] font-semibold text-sage-600 bg-sage-100 px-1.5 py-0.5 rounded-full">
+                              <Check className="w-2.5 h-2.5" /> Approvata
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full">
+                              In attesa
+                            </span>
+                          )}
+                          {isAdmin && !d.approvata && (
+                            <button
+                              onClick={() => handleApprova(d)}
+                              className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-sage-500 hover:bg-sage-600 text-white transition-colors"
+                            >
+                              Approva
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))
                   )}
