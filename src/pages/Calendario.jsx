@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { useProfile } from '../context/ProfileContext'
 import {
   format, startOfMonth, endOfMonth, eachDayOfInterval,
   isToday, isSameDay, addMonths, subMonths, parseISO,
   addDays, getDate, getMonth, isAfter, isBefore,
 } from 'date-fns'
 import { it } from 'date-fns/locale'
-import { ChevronLeft, ChevronRight, Plus, Trash2, Users, CheckCircle, Calendar, ClipboardList, Check } from 'lucide-react'
-import { useProfile } from '../context/ProfileContext'
+import {
+  ChevronLeft, ChevronRight, Plus, Trash2,
+  Users, CheckCircle, Calendar, ClipboardList, Check,
+} from 'lucide-react'
 
 const UNITA = ['Interno 1', 'Interno 2', 'Interno 3', 'Interno 4', 'Interno 5', 'Interno 6']
 
@@ -27,42 +30,25 @@ function getObbligoOccurrences(obbligo, month) {
 
   const rangeEnd = fine && isBefore(fine, monthEnd) ? fine : monthEnd
   const monthDays = eachDayOfInterval({ start: monthStart, end: rangeEnd })
-
   const inRange = (d) => !isBefore(d, start) && (!fine || !isAfter(d, fine))
 
   switch (obbligo.ricorrenza) {
-    case 'unica':
-      return monthDays.filter(d => isSameDay(d, start))
-    case 'giornaliera':
-      return monthDays.filter(inRange)
+    case 'unica':       return monthDays.filter(d => isSameDay(d, start))
+    case 'giornaliera': return monthDays.filter(inRange)
     case 'settimanale': {
-      const days = []
-      let cur = start
-      while (!isAfter(cur, rangeEnd)) {
-        if (!isBefore(cur, monthStart)) days.push(cur)
-        cur = addDays(cur, 7)
-      }
+      const days = []; let cur = start
+      while (!isAfter(cur, rangeEnd)) { if (!isBefore(cur, monthStart)) days.push(cur); cur = addDays(cur, 7) }
       return days
     }
-    case 'mensile':
-      return monthDays.filter(d => getDate(d) === getDate(start) && inRange(d))
+    case 'mensile': return monthDays.filter(d => getDate(d) === getDate(start) && inRange(d))
     case 'trimestrale': {
-      const days = []
-      let cur = start
-      while (!isAfter(cur, rangeEnd)) {
-        if (!isBefore(cur, monthStart)) days.push(cur)
-        cur = addMonths(cur, 3)
-      }
+      const days = []; let cur = start
+      while (!isAfter(cur, rangeEnd)) { if (!isBefore(cur, monthStart)) days.push(cur); cur = addMonths(cur, 3) }
       return days
     }
     case 'annuale':
-      return monthDays.filter(d =>
-        getDate(d) === getDate(start) &&
-        getMonth(d) === getMonth(start) &&
-        inRange(d)
-      )
-    default:
-      return []
+      return monthDays.filter(d => getDate(d) === getDate(start) && getMonth(d) === getMonth(start) && inRange(d))
+    default: return []
   }
 }
 
@@ -71,43 +57,54 @@ export default function Calendario() {
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [disponibilita, setDisponibilita] = useState([])
   const [obblighi, setObblighi] = useState([])
+  const [assemblee, setAssemblee] = useState([])
   const [selectedDay, setSelectedDay] = useState(null)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ data: '', ora: '10:00', unita: '', note: '' })
   const [loading, setLoading] = useState(false)
   const [session, setSession] = useState(null)
+  // Modal approvazione
+  const [approvaModal, setApprovaModal] = useState(null) // { day, ora, note }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
     fetchDisponibilita()
     fetchObblighi()
+    fetchAssemblee()
   }, [currentMonth])
 
   const fetchDisponibilita = async () => {
-    const start = startOfMonth(currentMonth)
-    const end = endOfMonth(currentMonth)
     const { data } = await supabase
       .from('disponibilita_assemblee')
       .select('*')
-      .gte('data', start.toISOString())
-      .lte('data', end.toISOString())
+      .gte('data', startOfMonth(currentMonth).toISOString())
+      .lte('data', endOfMonth(currentMonth).toISOString())
       .order('data')
     setDisponibilita(data || [])
   }
 
   const fetchObblighi = async () => {
-    const { data } = await supabase
-      .from('obblighi')
-      .select('*')
-      .eq('completato', false)
+    const { data } = await supabase.from('obblighi').select('*').eq('completato', false)
     setObblighi(data || [])
+  }
+
+  const fetchAssemblee = async () => {
+    const start = format(startOfMonth(currentMonth), 'yyyy-MM-dd')
+    const end = format(endOfMonth(currentMonth), 'yyyy-MM-dd')
+    const { data } = await supabase
+      .from('assemblee')
+      .select('*')
+      .gte('data', start)
+      .lte('data', end)
+    setAssemblee(data || [])
   }
 
   const days = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) })
   const firstDayOfWeek = (startOfMonth(currentMonth).getDay() + 6) % 7
 
-  const dispForDay = (day) => disponibilita.filter(d => isSameDay(parseISO(d.data), day))
-  const obbligiForDay = (day) => obblighi.filter(o => getObbligoOccurrences(o, currentMonth).some(d => isSameDay(d, day)))
+  const dispForDay     = (day) => disponibilita.filter(d => isSameDay(parseISO(d.data), day))
+  const obbligiForDay  = (day) => obblighi.filter(o => getObbligoOccurrences(o, currentMonth).some(d => isSameDay(d, day)))
+  const assembleaForDay = (day) => assemblee.find(a => a.data === format(day, 'yyyy-MM-dd'))
 
   const handleDayClick = (day) => {
     setSelectedDay(day)
@@ -137,19 +134,49 @@ export default function Calendario() {
     fetchDisponibilita()
   }
 
-  const handleApprova = async (disp) => {
-    const { error } = await supabase
-      .from('disponibilita_assemblee')
-      .update({ approvata: true })
-      .eq('id', disp.id)
-    if (!error && disp.user_id) {
-      await supabase.from('notifiche').insert({
-        user_id: disp.user_id,
-        titolo: 'Disponibilità approvata ✓',
-        messaggio: `La tua disponibilità per il ${format(parseISO(disp.data), 'd MMMM yyyy', { locale: it })} alle ${disp.ora} è stata approvata dall'amministratore.`,
-      })
+  const handleDeleteAssemblea = async (id) => {
+    await supabase.from('assemblee').delete().eq('id', id)
+    fetchAssemblee()
+  }
+
+  const openApprovaModal = (day) => {
+    const disps = dispForDay(day)
+    // Pre-compila con l'orario più comune tra le disponibilità
+    const counts = {}
+    disps.forEach(d => { counts[d.ora] = (counts[d.ora] || 0) + 1 })
+    const oraDefault = Object.keys(counts).length > 0
+      ? Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0]
+      : '10:00'
+    setApprovaModal({ day, ora: oraDefault, note: '' })
+  }
+
+  const handleApprovaSubmit = async (e) => {
+    e.preventDefault()
+    const { day, ora, note } = approvaModal
+    const dateStr = format(day, 'yyyy-MM-dd')
+
+    const { data: { user } } = await supabase.auth.getUser()
+    const { error } = await supabase.from('assemblee').insert({
+      data: dateStr,
+      ora,
+      note: note || null,
+      created_by: user?.id,
+    })
+
+    if (!error) {
+      // Invia notifica a tutti gli utenti che hanno segnato disponibilità quel giorno
+      const disps = dispForDay(day)
+      const userIds = [...new Set(disps.filter(d => d.user_id).map(d => d.user_id))]
+      for (const uid of userIds) {
+        await supabase.from('notifiche').insert({
+          user_id: uid,
+          titolo: 'Assemblea confermata 📅',
+          messaggio: `L'assemblea condominiale è confermata per il ${format(day, 'd MMMM yyyy', { locale: it })} alle ore ${ora}.${note ? ' ' + note : ''}`,
+        })
+      }
+      setApprovaModal(null)
+      fetchAssemblee()
     }
-    fetchDisponibilita()
   }
 
   const weekDays = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom']
@@ -168,8 +195,15 @@ export default function Calendario() {
 
       {/* Legend */}
       <div className="flex items-center gap-4 text-xs text-stone-500">
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-terracotta-400 inline-block" /> Disponibilità assemblea</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-sage-500 inline-block" /> Obbligo comune</span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-terracotta-400 inline-block" /> Disponibilità
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-sage-500 inline-block" /> Obbligo comune
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" /> Assemblea confermata
+        </span>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-5">
@@ -193,16 +227,20 @@ export default function Calendario() {
             ))}
             {Array(firstDayOfWeek).fill(null).map((_, i) => <div key={`empty-${i}`} className="min-h-[5rem]" />)}
             {days.map(day => {
-              const disp = dispForDay(day)
-              const obbli = obbligiForDay(day)
-              const isSelected = selectedDay && isSameDay(day, selectedDay)
-              const isCurrentDay = isToday(day)
+              const disp      = dispForDay(day)
+              const obbli     = obbligiForDay(day)
+              const assemblea = assembleaForDay(day)
+              const isSelected    = selectedDay && isSameDay(day, selectedDay)
+              const isCurrentDay  = isToday(day)
+
               const allEvents = [
-                ...disp.map(d => ({ type: 'disp', label: d.unita || d.ora, key: d.id })),
-                ...obbli.map(o => ({ type: 'obbligo', label: o.titolo, key: o.id })),
+                ...(assemblea ? [{ type: 'assemblea', label: `🗓 ${assemblea.ora}` }] : []),
+                ...disp.map(d => ({ type: 'disp', label: d.unita || d.ora })),
+                ...obbli.map(o => ({ type: 'obbligo', label: o.titolo })),
               ]
               const visible = allEvents.slice(0, 2)
-              const extra = allEvents.length - visible.length
+              const extra   = allEvents.length - visible.length
+
               return (
                 <button
                   key={day.toISOString()}
@@ -220,9 +258,11 @@ export default function Calendario() {
                   <div className="flex flex-col gap-0.5 w-full overflow-hidden">
                     {visible.map((ev, i) => (
                       <span key={i} className={`text-[10px] font-medium px-1 py-0.5 rounded truncate leading-tight block
-                        ${ev.type === 'disp'
-                          ? isSelected ? 'bg-white/25 text-white' : 'bg-terracotta-100 text-terracotta-700'
-                          : isSelected ? 'bg-white/20 text-white' : 'bg-sage-100 text-sage-700'
+                        ${ev.type === 'assemblea'
+                          ? isSelected ? 'bg-white/25 text-white' : 'bg-indigo-100 text-indigo-700'
+                          : ev.type === 'disp'
+                            ? isSelected ? 'bg-white/25 text-white' : 'bg-terracotta-100 text-terracotta-700'
+                            : isSelected ? 'bg-white/20 text-white' : 'bg-sage-100 text-sage-700'
                         }
                       `}>
                         {ev.label}
@@ -241,62 +281,91 @@ export default function Calendario() {
         </div>
 
         {/* Sidebar */}
-        <div className="card p-4 space-y-4">
+        <div className="card p-4 space-y-4 overflow-y-auto max-h-[600px]">
           {selectedDay ? (
             <>
               <h3 className="font-semibold text-stone-700 text-sm capitalize">
                 {format(selectedDay, 'EEEE d MMMM', { locale: it })}
               </h3>
 
+              {/* Assemblea confermata */}
+              {(() => {
+                const a = assembleaForDay(selectedDay)
+                if (!a) return null
+                return (
+                  <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-indigo-700 flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" /> Assemblea confermata
+                        </p>
+                        <p className="text-sm font-bold text-indigo-800 mt-0.5">Ore {a.ora}</p>
+                        {a.note && <p className="text-xs text-indigo-600 mt-0.5">{a.note}</p>}
+                      </div>
+                      {isAdmin && (
+                        <button onClick={() => handleDeleteAssemblea(a.id)} className="text-indigo-300 hover:text-red-400 transition-colors">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
+
               {/* Disponibilità */}
               <div>
                 <p className="text-xs font-medium text-stone-400 uppercase tracking-wide mb-2 flex items-center gap-1">
-                  <Users className="w-3 h-3" /> Disponibilità assemblea
+                  <Users className="w-3 h-3" /> Disponibilità ricevute
                 </p>
-                <div className="space-y-2">
-                  {dispForDay(selectedDay).length === 0 ? (
-                    <p className="text-stone-400 text-xs">Nessuna segnata</p>
-                  ) : (
-                    dispForDay(selectedDay).map(d => (
-                      <div key={d.id} className={`p-2.5 rounded-lg border ${d.approvata ? 'bg-sage-50 border-sage-200' : 'bg-terracotta-50 border-terracotta-100'}`}>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <Users className={`w-3.5 h-3.5 flex-shrink-0 ${d.approvata ? 'text-sage-600' : 'text-terracotta-500'}`} />
-                              <span className={`text-xs font-semibold truncate ${d.approvata ? 'text-sage-700' : 'text-terracotta-700'}`}>{d.unita}</span>
-                            </div>
-                            <p className="text-xs text-stone-500 mt-0.5">{d.ora}{d.note && ` · ${d.note}`}</p>
+
+                {dispForDay(selectedDay).length === 0 ? (
+                  <p className="text-stone-400 text-xs">Nessuna segnata</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {/* Riepilogo per unità */}
+                    <div className="grid grid-cols-2 gap-1 mb-2">
+                      {UNITA.map(u => {
+                        const d = dispForDay(selectedDay).find(d => d.unita === u)
+                        return (
+                          <div key={u} className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium
+                            ${d ? 'bg-sage-50 text-sage-700' : 'bg-stone-50 text-stone-400'}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${d ? 'bg-sage-500' : 'bg-stone-300'}`} />
+                            <span className="truncate">{u.replace('Interno ', 'Int. ')}</span>
+                            {d && <span className="ml-auto text-sage-500 text-[10px]">{d.ora}</span>}
                           </div>
-                          <button onClick={() => handleDelete(d.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {/* Lista dettagliata */}
+                    {dispForDay(selectedDay).map(d => (
+                      <div key={d.id} className="flex items-center justify-between gap-2 px-2.5 py-2 bg-terracotta-50 rounded-lg">
+                        <div>
+                          <span className="text-xs font-semibold text-terracotta-700">{d.unita}</span>
+                          <span className="text-xs text-stone-500 ml-2">{d.ora}{d.note && ` · ${d.note}`}</span>
                         </div>
-                        <div className="flex items-center justify-between mt-2">
-                          {d.approvata ? (
-                            <span className="flex items-center gap-1 text-[10px] font-semibold text-sage-600 bg-sage-100 px-1.5 py-0.5 rounded-full">
-                              <Check className="w-2.5 h-2.5" /> Approvata
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full">
-                              In attesa
-                            </span>
-                          )}
-                          {isAdmin && !d.approvata && (
-                            <button
-                              onClick={() => handleApprova(d)}
-                              className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-sage-500 hover:bg-sage-600 text-white transition-colors"
-                            >
-                              Approva
-                            </button>
-                          )}
-                        </div>
+                        <button onClick={() => handleDelete(d.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
                       </div>
-                    ))
-                  )}
-                </div>
+                    ))}
+                  </div>
+                )}
+
                 <button onClick={() => setShowForm(true)} className="mt-2 w-full btn-secondary text-xs py-2">
                   + Aggiungi disponibilità
                 </button>
+
+                {/* Bottone approva (admin, solo se c'è almeno 1 disponibilità e non già approvata) */}
+                {isAdmin && dispForDay(selectedDay).length > 0 && !assembleaForDay(selectedDay) && (
+                  <button
+                    onClick={() => openApprovaModal(selectedDay)}
+                    className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    Approva come data assemblea
+                  </button>
+                )}
               </div>
 
               {/* Obblighi */}
@@ -350,6 +419,24 @@ export default function Calendario() {
         </div>
       </div>
 
+      {/* Assemblee confermate questo mese */}
+      {assemblee.length > 0 && (
+        <div className="card p-4">
+          <h3 className="font-medium text-stone-600 text-xs uppercase tracking-wide mb-3 flex items-center gap-2">
+            <Check className="w-4 h-4 text-indigo-500" />
+            Assemblee confermate questo mese
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {assemblee.map(a => (
+              <div key={a.id} className="px-3 py-1.5 rounded-lg text-xs font-medium border bg-indigo-50 text-indigo-700 border-indigo-200">
+                {format(parseISO(a.data + 'T00:00:00'), 'd MMMM', { locale: it })} · ore {a.ora}
+                {a.note && <span className="text-indigo-500"> · {a.note}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Obblighi attivi questo mese */}
       {obblighi.some(o => getObbligoOccurrences(o, currentMonth).length > 0) && (
         <div className="card p-4">
@@ -370,7 +457,7 @@ export default function Calendario() {
         </div>
       )}
 
-      {/* Modal Form */}
+      {/* Modal: aggiungi disponibilità */}
       {showForm && (
         <div className="fixed inset-0 bg-stone-900/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
@@ -400,6 +487,49 @@ export default function Calendario() {
                 <button type="submit" disabled={loading} className="btn-primary flex-1 flex items-center justify-center gap-2">
                   {loading && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                   Salva
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: approva assemblea */}
+      {approvaModal && (
+        <div className="fixed inset-0 bg-stone-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <h3 className="font-semibold text-stone-800 mb-1">Approva data assemblea</h3>
+            <p className="text-sm text-stone-500 mb-4 capitalize">
+              {format(approvaModal.day, 'EEEE d MMMM yyyy', { locale: it })}
+            </p>
+            <p className="text-xs text-stone-400 mb-4">
+              Verrà inviata una notifica a {dispForDay(approvaModal.day).length} {dispForDay(approvaModal.day).length === 1 ? 'condomino disponibile' : 'condomini disponibili'}.
+            </p>
+            <form onSubmit={handleApprovaSubmit} className="space-y-4">
+              <div>
+                <label className="label">Orario assemblea</label>
+                <input
+                  type="time"
+                  value={approvaModal.ora}
+                  onChange={e => setApprovaModal(m => ({ ...m, ora: e.target.value }))}
+                  className="input"
+                  required
+                />
+                <p className="text-xs text-stone-400 mt-1">Pre-compilato con l'orario più comune tra le disponibilità</p>
+              </div>
+              <div>
+                <label className="label">Comunicazione aggiuntiva (opzionale)</label>
+                <textarea
+                  value={approvaModal.note}
+                  onChange={e => setApprovaModal(m => ({ ...m, note: e.target.value }))}
+                  className="input h-16 resize-none"
+                  placeholder="es. Ordine del giorno: approvazione bilancio..."
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={() => setApprovaModal(null)} className="btn-secondary flex-1">Annulla</button>
+                <button type="submit" className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold transition-colors">
+                  <Check className="w-4 h-4" /> Conferma e notifica
                 </button>
               </div>
             </form>

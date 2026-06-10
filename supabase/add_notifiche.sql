@@ -1,10 +1,6 @@
 -- ============================================================
--- NOTIFICHE - eseguire nell'SQL editor di Supabase
+-- NOTIFICHE + ASSEMBLEE - eseguire nell'SQL editor di Supabase
 -- ============================================================
-
--- Aggiunge lo stato di approvazione alla disponibilità assemblee
--- NULL = in attesa, TRUE = approvata
-ALTER TABLE disponibilita_assemblee ADD COLUMN IF NOT EXISTS approvata BOOLEAN DEFAULT NULL;
 
 -- Tabella notifiche per gli utenti
 CREATE TABLE IF NOT EXISTS notifiche (
@@ -18,14 +14,35 @@ CREATE TABLE IF NOT EXISTS notifiche (
 
 ALTER TABLE notifiche ENABLE ROW LEVEL SECURITY;
 
--- Ogni utente legge solo le proprie notifiche
 CREATE POLICY "Lettura propria" ON notifiche
   FOR SELECT TO authenticated USING (user_id = auth.uid());
 
--- Solo admin può inserire notifiche (le crea quando approva)
 CREATE POLICY "Inserimento admin" ON notifiche
   FOR INSERT TO authenticated WITH CHECK (public.is_admin());
 
--- Ogni utente può aggiornare (segnare come letta) solo le proprie
 CREATE POLICY "Aggiornamento proprio" ON notifiche
   FOR UPDATE TO authenticated USING (user_id = auth.uid());
+
+-- Tabella assemblee approvate dall'admin
+CREATE TABLE IF NOT EXISTS assemblee (
+  id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  data       DATE NOT NULL UNIQUE,
+  ora        VARCHAR(5) NOT NULL DEFAULT '10:00',
+  note       TEXT,
+  created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE assemblee ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Lettura autenticati" ON assemblee
+  FOR SELECT TO authenticated USING (true);
+
+CREATE POLICY "Inserimento admin" ON assemblee
+  FOR INSERT TO authenticated WITH CHECK (public.is_admin());
+
+CREATE POLICY "Aggiornamento admin" ON assemblee
+  FOR UPDATE TO authenticated USING (public.is_admin());
+
+CREATE POLICY "Eliminazione admin" ON assemblee
+  FOR DELETE TO authenticated USING (public.is_admin());
