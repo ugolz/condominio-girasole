@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { supabase } from './lib/supabase'
 import { ProfileProvider } from './context/ProfileContext'
+import { ToastProvider } from './components/Toast'
+import { ConfirmProvider } from './components/ConfirmDialog'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Calendario from './pages/Calendario'
@@ -43,6 +45,8 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <ToastProvider>
+      <ConfirmProvider>
       <Routes>
         <Route path="/auth" element={!session ? <Auth /> : <Navigate to="/" replace />} />
         <Route
@@ -63,6 +67,8 @@ export default function App() {
           <Route path="impostazioni" element={<Impostazioni />} />
         </Route>
       </Routes>
+      </ConfirmProvider>
+      </ToastProvider>
     </BrowserRouter>
   )
 }

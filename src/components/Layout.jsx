@@ -14,7 +14,7 @@ import {
   Menu,
   X,
   ShieldCheck,
-  Settings
+  Settings,
 } from 'lucide-react'
 
 const navItems = [

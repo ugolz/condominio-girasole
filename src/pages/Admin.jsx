@@ -8,6 +8,7 @@ import {
   ShieldCheck, Plus, Trash2, Save, Receipt, BarChart2, Users,
   CheckCircle, XCircle, AlertTriangle
 } from 'lucide-react'
+import { useConfirm } from '../components/ConfirmDialog'
 
 const UNITA = ['Interno 1', 'Interno 2', 'Interno 3', 'Interno 4', 'Interno 5', 'Interno 6']
 const CATEGORIE = ['Manutenzione', 'Pulizie', 'Assicurazione', 'Utenze', 'Amministrazione', 'Altro']
@@ -26,6 +27,7 @@ function calcQuota(importo, millesimi) {
 // ── Tab Spese ──────────────────────────────────────────────────────────────
 
 function TabSpese({ session }) {
+  const confirm = useConfirm()
   const [spese, setSpese] = useState([])
   const [millesimi, setMillesimi] = useState([])
   const [loading, setLoading] = useState(true)
@@ -35,6 +37,8 @@ function TabSpese({ session }) {
     titolo: '', descrizione: '', categoria: 'Manutenzione',
     data_scadenza: '', importo_totale: '', note: ''
   })
+  // Per-spesa: quale unità partecipa e con quanti millesimi
+  const [quoteConfig, setQuoteConfig] = useState([])
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -49,15 +53,27 @@ function TabSpese({ session }) {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  const preview = millesimi.map(m => ({
-    unita: m.unita,
-    millesimi: m.valore,
-    importo_quota: calcQuota(form.importo_totale, m.valore),
+  const openForm = () => {
+    setQuoteConfig(millesimi.map(m => ({ unita: m.unita, millesimi: String(m.valore), inclusa: true })))
+    setForm({ titolo: '', descrizione: '', categoria: 'Manutenzione', data_scadenza: '', importo_totale: '', note: '' })
+    setShowForm(true)
+  }
+
+  const setQuota = (unita, field, value) =>
+    setQuoteConfig(cfg => cfg.map(q => q.unita === unita ? { ...q, [field]: value } : q))
+
+  const previewRows = quoteConfig.map(q => ({
+    ...q,
+    importo_quota: q.inclusa ? calcQuota(form.importo_totale, q.millesimi) : 0,
   }))
+
+  const totaleDistribuito = previewRows.reduce((acc, p) => acc + p.importo_quota, 0)
+  const importo = parseFloat(form.importo_totale) || 0
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (millesimi.length === 0) return
+    const incluse = quoteConfig.filter(q => q.inclusa)
+    if (incluse.length === 0) return
     setSubmitting(true)
     const { data: spesa, error } = await supabase
       .from('spese_comuni')
@@ -66,7 +82,7 @@ function TabSpese({ session }) {
         descrizione: form.descrizione || null,
         categoria: form.categoria,
         data_scadenza: form.data_scadenza,
-        importo_totale: parseFloat(form.importo_totale),
+        importo_totale: importo,
         note: form.note || null,
         user_id: session?.user?.id,
       })
@@ -74,15 +90,14 @@ function TabSpese({ session }) {
       .single()
 
     if (!error && spesa) {
-      const quote = millesimi.map(m => ({
+      const quote = incluse.map(q => ({
         spesa_id: spesa.id,
-        unita: m.unita,
-        millesimi: m.valore,
-        importo_quota: calcQuota(form.importo_totale, m.valore),
+        unita: q.unita,
+        millesimi: parseFloat(q.millesimi) || 0,
+        importo_quota: calcQuota(form.importo_totale, q.millesimi),
       }))
       await supabase.from('quote_spese').insert(quote)
       setShowForm(false)
-      setForm({ titolo: '', descrizione: '', categoria: 'Manutenzione', data_scadenza: '', importo_totale: '', note: '' })
       fetchAll()
     }
     setSubmitting(false)
@@ -93,7 +108,7 @@ function TabSpese({ session }) {
     const msg = pagate > 0
       ? `Attenzione: ${pagate} quote risultano già pagate. Eliminare comunque la spesa?`
       : `Eliminare "${spesa.titolo}"? L'operazione è irreversibile.`
-    if (!window.confirm(msg)) return
+    if (!await confirm(msg)) return
     await supabase.from('spese_comuni').delete().eq('id', spesa.id)
     fetchAll()
   }
@@ -105,7 +120,7 @@ function TabSpese({ session }) {
       <div className="flex items-center justify-between">
         <p className="text-stone-500 text-sm">{spese.length} spese registrate</p>
         <button
-          onClick={() => setShowForm(true)}
+          onClick={openForm}
           disabled={millesimi.length === 0}
           title={millesimi.length === 0 ? 'Configura prima i millesimi' : undefined}
           className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -195,29 +210,72 @@ function TabSpese({ session }) {
                 <input type="text" value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} className="input" />
               </div>
 
-              {/* Preview quote */}
-              {form.importo_totale && parseFloat(form.importo_totale) > 0 && (
-                <div className="rounded-lg border border-stone-200 overflow-hidden">
-                  <div className="bg-stone-50 px-3 py-2 text-xs font-medium text-stone-500 uppercase tracking-wide">
-                    Anteprima quote per unità
+              {/* Quote per unità — editabili */}
+              <div className="rounded-lg border border-stone-200 overflow-hidden">
+                <div className="bg-stone-50 px-3 py-2 text-xs font-medium text-stone-500 uppercase tracking-wide">
+                  Partecipazione per unità
+                </div>
+                <div className="divide-y divide-stone-100">
+                  {/* header */}
+                  <div className="grid grid-cols-[auto_1fr_6rem_6rem] items-center gap-2 px-3 py-1.5 text-xs text-stone-400 font-medium">
+                    <span className="w-4" />
+                    <span>Unità</span>
+                    <span className="text-center">Millesimi</span>
+                    <span className="text-right">Quota</span>
                   </div>
-                  <div className="divide-y divide-stone-100">
-                    {preview.map(p => (
-                      <div key={p.unita} className="flex items-center justify-between px-3 py-2 text-sm">
-                        <span className="text-stone-600">{p.unita}</span>
-                        <span className="font-medium text-stone-800">
-                          €{p.importo_quota.toLocaleString('it-IT', { minimumFractionDigits: 2 })}
-                          <span className="text-stone-400 font-normal ml-1">({p.millesimi} mill.)</span>
+                  {quoteConfig.map(q => {
+                    const quota = q.inclusa ? calcQuota(form.importo_totale, q.millesimi) : 0
+                    return (
+                      <div key={q.unita} className={`grid grid-cols-[auto_1fr_6rem_6rem] items-center gap-2 px-3 py-2 transition-colors ${!q.inclusa ? 'opacity-40' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={q.inclusa}
+                          onChange={e => setQuota(q.unita, 'inclusa', e.target.checked)}
+                          className="w-4 h-4 rounded border-stone-300 accent-terracotta-500"
+                        />
+                        <span className="text-sm text-stone-700">{q.unita}</span>
+                        <input
+                          type="number"
+                          step="0.001"
+                          min="0"
+                          max="1000"
+                          value={q.millesimi}
+                          disabled={!q.inclusa}
+                          onChange={e => setQuota(q.unita, 'millesimi', e.target.value)}
+                          className="input py-1 text-center text-xs disabled:cursor-not-allowed"
+                        />
+                        <span className={`text-right text-sm font-medium ${q.inclusa ? 'text-stone-800' : 'text-stone-300'}`}>
+                          {importo > 0 ? `€${quota.toLocaleString('it-IT', { minimumFractionDigits: 2 })}` : '—'}
                         </span>
                       </div>
-                    ))}
-                  </div>
+                    )
+                  })}
+                  {/* totale distribuito */}
+                  {importo > 0 && (
+                    <div className="grid grid-cols-[auto_1fr_6rem_6rem] items-center gap-2 px-3 py-2 bg-stone-50 text-xs font-semibold text-stone-600">
+                      <span className="w-4" />
+                      <span>Totale distribuito</span>
+                      <span />
+                      <span className={`text-right ${Math.abs(totaleDistribuito - importo) > 0.05 ? 'text-amber-600' : 'text-sage-600'}`}>
+                        €{totaleDistribuito.toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
                 </div>
+              </div>
+              {importo > 0 && Math.abs(totaleDistribuito - importo) > 0.05 && (
+                <p className="text-xs text-amber-600">
+                  Il totale distribuito differisce dall'importo totale di €{Math.abs(importo - totaleDistribuito).toLocaleString('it-IT', { minimumFractionDigits: 2 })}.
+                </p>
               )}
 
               <div className="flex gap-2 pt-2">
                 <button type="button" onClick={() => setShowForm(false)} className="btn-secondary flex-1">Annulla</button>
-                <button type="submit" disabled={submitting} className="btn-primary flex-1 flex items-center justify-center gap-2">
+                <button
+                  type="submit"
+                  disabled={submitting || quoteConfig.filter(q => q.inclusa).length === 0}
+                  className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50"
+                >
                   {submitting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                   Crea spesa
                 </button>

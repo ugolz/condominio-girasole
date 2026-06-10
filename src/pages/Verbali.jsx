@@ -3,8 +3,10 @@ import { supabase } from '../lib/supabase'
 import { Upload, Download, Trash2, FileText, Eye } from 'lucide-react'
 import { format } from 'date-fns'
 import { it } from 'date-fns/locale'
+import { useConfirm } from '../components/ConfirmDialog'
 
 export default function Verbali() {
+  const confirm = useConfirm()
   const [verbali, setVerbali] = useState([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -66,7 +68,7 @@ export default function Verbali() {
   }
 
   const handleDelete = async (id, file_path) => {
-    if (!confirm('Eliminare questo verbale?')) return
+    if (!await confirm('Eliminare questo verbale? Il file PDF verrà rimosso definitivamente.')) return
     await supabase.storage.from('documenti').remove([file_path])
     await supabase.from('verbali').delete().eq('id', id)
     fetchVerbali()

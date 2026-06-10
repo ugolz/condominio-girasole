@@ -1,14 +1,74 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday, isSameDay, addMonths, subMonths, parseISO } from 'date-fns'
+import {
+  format, startOfMonth, endOfMonth, eachDayOfInterval,
+  isToday, isSameDay, addMonths, subMonths, parseISO,
+  addDays, getDate, getMonth, isAfter, isBefore,
+} from 'date-fns'
 import { it } from 'date-fns/locale'
-import { ChevronLeft, ChevronRight, Plus, Trash2, Users, CheckCircle, Calendar } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Trash2, Users, CheckCircle, Calendar, ClipboardList } from 'lucide-react'
 
 const UNITA = ['Interno 1', 'Interno 2', 'Interno 3', 'Interno 4', 'Interno 5', 'Interno 6']
+
+const ricorrenzaLabel = {
+  giornaliera: 'Ogni giorno', settimanale: 'Ogni settimana', mensile: 'Ogni mese',
+  trimestrale: 'Ogni trimestre', annuale: 'Annuale', unica: 'Una tantum',
+}
+
+function getObbligoOccurrences(obbligo, month) {
+  if (!obbligo.data_inizio || obbligo.completato) return []
+  const start = parseISO(obbligo.data_inizio)
+  const fine = obbligo.data_fine ? parseISO(obbligo.data_fine) : null
+  const monthStart = startOfMonth(month)
+  const monthEnd = endOfMonth(month)
+  if (isAfter(start, monthEnd)) return []
+  if (fine && isBefore(fine, monthStart)) return []
+
+  const rangeEnd = fine && isBefore(fine, monthEnd) ? fine : monthEnd
+  const monthDays = eachDayOfInterval({ start: monthStart, end: rangeEnd })
+
+  const inRange = (d) => !isBefore(d, start) && (!fine || !isAfter(d, fine))
+
+  switch (obbligo.ricorrenza) {
+    case 'unica':
+      return monthDays.filter(d => isSameDay(d, start))
+    case 'giornaliera':
+      return monthDays.filter(inRange)
+    case 'settimanale': {
+      const days = []
+      let cur = start
+      while (!isAfter(cur, rangeEnd)) {
+        if (!isBefore(cur, monthStart)) days.push(cur)
+        cur = addDays(cur, 7)
+      }
+      return days
+    }
+    case 'mensile':
+      return monthDays.filter(d => getDate(d) === getDate(start) && inRange(d))
+    case 'trimestrale': {
+      const days = []
+      let cur = start
+      while (!isAfter(cur, rangeEnd)) {
+        if (!isBefore(cur, monthStart)) days.push(cur)
+        cur = addMonths(cur, 3)
+      }
+      return days
+    }
+    case 'annuale':
+      return monthDays.filter(d =>
+        getDate(d) === getDate(start) &&
+        getMonth(d) === getMonth(start) &&
+        inRange(d)
+      )
+    default:
+      return []
+  }
+}
 
 export default function Calendario() {
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [disponibilita, setDisponibilita] = useState([])
+  const [obblighi, setObblighi] = useState([])
   const [selectedDay, setSelectedDay] = useState(null)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ data: '', ora: '10:00', unita: '', note: '' })
@@ -18,6 +78,7 @@ export default function Calendario() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
     fetchDisponibilita()
+    fetchObblighi()
   }, [currentMonth])
 
   const fetchDisponibilita = async () => {
@@ -32,10 +93,19 @@ export default function Calendario() {
     setDisponibilita(data || [])
   }
 
+  const fetchObblighi = async () => {
+    const { data } = await supabase
+      .from('obblighi')
+      .select('*')
+      .eq('completato', false)
+    setObblighi(data || [])
+  }
+
   const days = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) })
-  const firstDayOfWeek = (startOfMonth(currentMonth).getDay() + 6) % 7 // Monday=0
+  const firstDayOfWeek = (startOfMonth(currentMonth).getDay() + 6) % 7
 
   const dispForDay = (day) => disponibilita.filter(d => isSameDay(parseISO(d.data), day))
+  const obbligiForDay = (day) => obblighi.filter(o => getObbligoOccurrences(o, currentMonth).some(d => isSameDay(d, day)))
 
   const handleDayClick = (day) => {
     setSelectedDay(day)
@@ -71,12 +141,18 @@ export default function Calendario() {
     <div className="max-w-4xl mx-auto space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-stone-800">Calendario Assemblee</h1>
-          <p className="text-stone-400 text-sm">Segna la tua disponibilità per le assemblee condominiali</p>
+          <h1 className="text-xl font-semibold text-stone-800">Calendario</h1>
+          <p className="text-stone-400 text-sm">Disponibilità assemblee e obblighi comuni</p>
         </div>
-        <button onClick={() => { setShowForm(true) }} className="btn-primary flex items-center gap-2">
+        <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2">
           <Plus className="w-4 h-4" /> Aggiungi disponibilità
         </button>
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center gap-4 text-xs text-stone-500">
+        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-terracotta-400 inline-block" /> Disponibilità assemblea</span>
+        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-sage-500 inline-block" /> Obbligo comune</span>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-5">
@@ -94,7 +170,6 @@ export default function Calendario() {
             </button>
           </div>
 
-          {/* Grid */}
           <div className="grid grid-cols-7 gap-0.5">
             {weekDays.map(d => (
               <div key={d} className="text-center text-xs font-medium text-stone-400 py-2">{d}</div>
@@ -102,6 +177,7 @@ export default function Calendario() {
             {Array(firstDayOfWeek).fill(null).map((_, i) => <div key={`empty-${i}`} />)}
             {days.map(day => {
               const disp = dispForDay(day)
+              const obbli = obbligiForDay(day)
               const isSelected = selectedDay && isSameDay(day, selectedDay)
               return (
                 <button
@@ -113,10 +189,13 @@ export default function Calendario() {
                   `}
                 >
                   <span className="text-xs font-medium">{format(day, 'd')}</span>
-                  {disp.length > 0 && (
-                    <div className={`flex gap-0.5 mt-0.5 flex-wrap justify-center max-w-full`}>
-                      {disp.slice(0, 3).map((_, i) => (
-                        <div key={i} className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white' : 'bg-terracotta-400'}`} />
+                  {(disp.length > 0 || obbli.length > 0) && (
+                    <div className="flex gap-0.5 mt-0.5 flex-wrap justify-center max-w-full">
+                      {disp.slice(0, 2).map((_, i) => (
+                        <div key={`d${i}`} className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white' : 'bg-terracotta-400'}`} />
+                      ))}
+                      {obbli.slice(0, 2).map((_, i) => (
+                        <div key={`o${i}`} className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white/70' : 'bg-sage-500'}`} />
                       ))}
                     </div>
                   )}
@@ -126,50 +205,78 @@ export default function Calendario() {
           </div>
         </div>
 
-        {/* Sidebar - selected day */}
-        <div className="card p-4">
+        {/* Sidebar */}
+        <div className="card p-4 space-y-4">
           {selectedDay ? (
             <>
-              <h3 className="font-semibold text-stone-700 text-sm mb-1 capitalize">
+              <h3 className="font-semibold text-stone-700 text-sm capitalize">
                 {format(selectedDay, 'EEEE d MMMM', { locale: it })}
               </h3>
-              <div className="space-y-2 mt-3">
-                {dispForDay(selectedDay).length === 0 ? (
-                  <p className="text-stone-400 text-sm">Nessuna disponibilità segnata</p>
-                ) : (
-                  dispForDay(selectedDay).map(d => (
-                    <div key={d.id} className="flex items-start justify-between gap-2 p-2.5 bg-terracotta-50 rounded-lg">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <Users className="w-3.5 h-3.5 text-terracotta-500" />
-                          <span className="text-xs font-semibold text-terracotta-700">{d.unita}</span>
+
+              {/* Disponibilità */}
+              <div>
+                <p className="text-xs font-medium text-stone-400 uppercase tracking-wide mb-2 flex items-center gap-1">
+                  <Users className="w-3 h-3" /> Disponibilità assemblea
+                </p>
+                <div className="space-y-2">
+                  {dispForDay(selectedDay).length === 0 ? (
+                    <p className="text-stone-400 text-xs">Nessuna segnata</p>
+                  ) : (
+                    dispForDay(selectedDay).map(d => (
+                      <div key={d.id} className="flex items-start justify-between gap-2 p-2.5 bg-terracotta-50 rounded-lg">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <Users className="w-3.5 h-3.5 text-terracotta-500" />
+                            <span className="text-xs font-semibold text-terracotta-700">{d.unita}</span>
+                          </div>
+                          <p className="text-xs text-stone-500 mt-0.5">{d.ora}{d.note && ` · ${d.note}`}</p>
                         </div>
-                        <p className="text-xs text-stone-500 mt-0.5">{d.ora} {d.note && `· ${d.note}`}</p>
+                        <button onClick={() => handleDelete(d.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                      <button onClick={() => handleDelete(d.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))
-                )}
+                    ))
+                  )}
+                </div>
+                <button onClick={() => setShowForm(true)} className="mt-2 w-full btn-secondary text-xs py-2">
+                  + Aggiungi disponibilità
+                </button>
               </div>
-              <button
-                onClick={() => setShowForm(true)}
-                className="mt-3 w-full btn-secondary text-xs py-2"
-              >
-                + Aggiungi per questo giorno
-              </button>
+
+              {/* Obblighi */}
+              <div>
+                <p className="text-xs font-medium text-stone-400 uppercase tracking-wide mb-2 flex items-center gap-1">
+                  <ClipboardList className="w-3 h-3" /> Obblighi comuni
+                </p>
+                <div className="space-y-2">
+                  {obbligiForDay(selectedDay).length === 0 ? (
+                    <p className="text-stone-400 text-xs">Nessun obbligo</p>
+                  ) : (
+                    obbligiForDay(selectedDay).map(o => (
+                      <div key={o.id} className="p-2.5 bg-sage-50 rounded-lg">
+                        <div className="flex items-center gap-1.5">
+                          <ClipboardList className="w-3.5 h-3.5 text-sage-600" />
+                          <span className="text-xs font-semibold text-sage-700">{o.titolo}</span>
+                        </div>
+                        <p className="text-xs text-stone-500 mt-0.5">
+                          {o.categoria}{o.assegnato_a && ` · ${o.assegnato_a}`} · {ricorrenzaLabel[o.ricorrenza]}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </>
           ) : (
             <div className="text-center py-8">
               <Calendar className="w-8 h-8 text-stone-200 mx-auto mb-2" />
-              <p className="text-stone-400 text-sm">Clicca su un giorno per vedere le disponibilità</p>
+              <p className="text-stone-400 text-sm">Clicca su un giorno per vedere gli eventi</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Summary */}
+      {/* Summary disponibilità */}
       <div className="card p-4">
         <h3 className="font-medium text-stone-600 text-xs uppercase tracking-wide mb-3 flex items-center gap-2">
           <CheckCircle className="w-4 h-4 text-sage-500" />
@@ -186,6 +293,26 @@ export default function Calendario() {
           })}
         </div>
       </div>
+
+      {/* Obblighi attivi questo mese */}
+      {obblighi.some(o => getObbligoOccurrences(o, currentMonth).length > 0) && (
+        <div className="card p-4">
+          <h3 className="font-medium text-stone-600 text-xs uppercase tracking-wide mb-3 flex items-center gap-2">
+            <ClipboardList className="w-4 h-4 text-sage-500" />
+            Obblighi attivi questo mese
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {obblighi
+              .filter(o => getObbligoOccurrences(o, currentMonth).length > 0)
+              .map(o => (
+                <div key={o.id} className="px-3 py-1.5 rounded-lg text-xs font-medium border bg-sage-50 text-sage-700 border-sage-200">
+                  {o.titolo}{o.assegnato_a ? ` — ${o.assegnato_a}` : ''}
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      )}
 
       {/* Modal Form */}
       {showForm && (

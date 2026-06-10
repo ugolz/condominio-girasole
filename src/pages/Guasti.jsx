@@ -3,11 +3,13 @@ import { supabase } from '../lib/supabase'
 import { Plus, Trash2, Wrench, CheckCircle, AlertTriangle, Clock } from 'lucide-react'
 import { format } from 'date-fns'
 import { it } from 'date-fns/locale'
+import { useConfirm } from '../components/ConfirmDialog'
 
 const CATEGORIE = ['Ascensore', 'Impianto elettrico', 'Idraulica', 'Riscaldamento', 'Tetto/Copertura', 'Scale comuni', 'Cancello/Portone', 'Illuminazione', 'Altro']
 const UNITA = ['Interno 1', 'Interno 2', 'Interno 3', 'Interno 4', 'Interno 5', 'Interno 6', 'Parti comuni']
 
 export default function Guasti() {
+  const confirm = useConfirm()
   const [guasti, setGuasti] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -35,7 +37,9 @@ export default function Guasti() {
   }
 
   const handleDelete = async (id) => {
-    if (confirm('Eliminare questa segnalazione?')) { await supabase.from('guasti').delete().eq('id', id); fetchGuasti() }
+    if (!await confirm('Eliminare questa segnalazione? L\'operazione è irreversibile.')) return
+    await supabase.from('guasti').delete().eq('id', id)
+    fetchGuasti()
   }
 
   const filtered = guasti.filter(g => {

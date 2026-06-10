@@ -22,11 +22,17 @@ CREATE TABLE IF NOT EXISTS obblighi (
   categoria VARCHAR(50) DEFAULT 'Altro',
   assegnato_a VARCHAR(50),
   ricorrenza VARCHAR(20) DEFAULT 'mensile',
+  data_inizio DATE,
+  data_fine DATE,
   completato BOOLEAN DEFAULT FALSE,
   completato_il TIMESTAMPTZ,
   user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Se la tabella esiste già, aggiungere le colonne:
+-- ALTER TABLE obblighi ADD COLUMN IF NOT EXISTS data_inizio DATE;
+-- ALTER TABLE obblighi ADD COLUMN IF NOT EXISTS data_fine DATE;
 
 -- Tabella: Scadenze
 CREATE TABLE IF NOT EXISTS scadenze (
@@ -70,6 +76,23 @@ CREATE TABLE IF NOT EXISTS verbali (
 );
 
 -- ============================================================
+-- HELPER: funzione is_admin() con SECURITY DEFINER
+-- Bypassa RLS su profiles per evitare dipendenza circolare
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE SQL
+SECURITY DEFINER
+STABLE
+AS $$
+  SELECT COALESCE(
+    (SELECT is_admin FROM public.profiles WHERE user_id = auth.uid() LIMIT 1),
+    FALSE
+  );
+$$;
+
+-- ============================================================
 -- ROW LEVEL SECURITY (RLS)
 -- ============================================================
 
@@ -91,7 +114,7 @@ CREATE POLICY "Lettura autenticati" ON verbali FOR SELECT TO authenticated USING
 CREATE POLICY "Inserimento autenticati" ON disponibilita_assemblee FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY "Inserimento autenticati" ON obblighi FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY "Inserimento solo admin" ON scadenze FOR INSERT TO authenticated
-  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+  WITH CHECK (public.is_admin());
 CREATE POLICY "Inserimento autenticati" ON guasti FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY "Inserimento autenticati" ON verbali FOR INSERT TO authenticated WITH CHECK (true);
 
@@ -106,7 +129,7 @@ CREATE POLICY "Aggiornamento autenticati" ON verbali FOR UPDATE TO authenticated
 CREATE POLICY "Eliminazione propria" ON disponibilita_assemblee FOR DELETE TO authenticated USING (auth.uid() = user_id OR user_id IS NULL);
 CREATE POLICY "Eliminazione propria" ON obblighi FOR DELETE TO authenticated USING (auth.uid() = user_id OR user_id IS NULL);
 CREATE POLICY "Eliminazione solo admin" ON scadenze FOR DELETE TO authenticated
-  USING (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+  USING (public.is_admin());
 CREATE POLICY "Eliminazione propria" ON guasti FOR DELETE TO authenticated USING (auth.uid() = user_id OR user_id IS NULL);
 CREATE POLICY "Eliminazione propria" ON verbali FOR DELETE TO authenticated USING (auth.uid() = user_id OR user_id IS NULL);
 
@@ -199,30 +222,30 @@ ALTER TABLE quote_spese ENABLE ROW LEVEL SECURITY;
 -- PROFILES
 CREATE POLICY "Lettura autenticati" ON profiles FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Aggiornamento admin o proprio" ON profiles FOR UPDATE TO authenticated
-  USING (auth.uid() = user_id OR EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = auth.uid() AND p.is_admin = TRUE));
+  USING (auth.uid() = user_id OR public.is_admin());
 
 -- MILLESIMI_CONFIG
 CREATE POLICY "Lettura autenticati" ON millesimi_config FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Modifica solo admin" ON millesimi_config FOR UPDATE TO authenticated
-  USING (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+  USING (public.is_admin());
 CREATE POLICY "Inserimento solo admin" ON millesimi_config FOR INSERT TO authenticated
-  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+  WITH CHECK (public.is_admin());
 
 -- SPESE_COMUNI
 CREATE POLICY "Lettura autenticati" ON spese_comuni FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Inserimento solo admin" ON spese_comuni FOR INSERT TO authenticated
-  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+  WITH CHECK (public.is_admin());
 CREATE POLICY "Eliminazione solo admin" ON spese_comuni FOR DELETE TO authenticated
-  USING (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+  USING (public.is_admin());
 
 -- QUOTE_SPESE
 CREATE POLICY "Lettura autenticati" ON quote_spese FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Inserimento solo admin" ON quote_spese FOR INSERT TO authenticated
-  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+  WITH CHECK (public.is_admin());
 CREATE POLICY "Aggiornamento quota" ON quote_spese FOR UPDATE TO authenticated
-  USING (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND (is_admin = TRUE OR unita = quote_spese.unita)));
+  USING (public.is_admin() OR unita = (SELECT unita FROM profiles WHERE user_id = auth.uid() LIMIT 1));
 CREATE POLICY "Eliminazione solo admin" ON quote_spese FOR DELETE TO authenticated
-  USING (EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin = TRUE));
+  USING (public.is_admin());
 
 -- ============================================================
 -- TRIGGER: crea profilo automaticamente all'iscrizione

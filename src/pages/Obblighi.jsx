@@ -3,16 +3,22 @@ import { supabase } from '../lib/supabase'
 import { Plus, Check, Trash2, RotateCcw, ClipboardList } from 'lucide-react'
 import { format } from 'date-fns'
 import { it } from 'date-fns/locale'
+import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmDialog'
 
 const CATEGORIE = ['Pulizie', 'Manutenzione', 'Giardino', 'Parcheggio', 'Altro']
 const UNITA = ['Interno 1', 'Interno 2', 'Interno 3', 'Interno 4', 'Interno 5', 'Interno 6', 'Tutti']
 
 export default function Obblighi() {
+  const toast = useToast()
+  const confirm = useConfirm()
   const [obblighi, setObblighi] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [filtro, setFiltro] = useState('tutti') // 'tutti' | 'pendenti' | 'completati'
-  const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: 'Pulizie', assegnato_a: '', ricorrenza: 'mensile', data_inizio: '' })
+  const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: 'Pulizie', assegnato_a: '', ricorrenza: 'mensile', data_inizio: '', data_fine: '' })
+  const [errore, setErrore] = useState(null)
 
   useEffect(() => { fetchObblighi() }, [])
 
@@ -22,22 +28,50 @@ export default function Obblighi() {
     setLoading(false)
   }
 
+  const FORM_VUOTO = { titolo: '', descrizione: '', categoria: 'Pulizie', assegnato_a: '', ricorrenza: 'mensile', data_inizio: '', data_fine: '' }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
-    const { error } = await supabase.from('obblighi').insert({ ...form, completato: false })
-    if (!error) { setShowForm(false); setForm({ titolo: '', descrizione: '', categoria: 'Pulizie', assegnato_a: '', ricorrenza: 'mensile', data_inizio: '' }); fetchObblighi() }
+    if (submitting) return
+    setErrore(null)
+    setSubmitting(true)
+    const payload = {
+      ...form,
+      assegnato_a: form.assegnato_a || null,
+      data_inizio: form.data_inizio || null,
+      data_fine: form.data_fine || null,
+      completato: false,
+    }
+    const { error } = await supabase.from('obblighi').insert(payload)
+    if (error) {
+      setErrore(error.message)
+      toast.error('Errore durante il salvataggio.')
+    } else {
+      setShowForm(false)
+      setForm(FORM_VUOTO)
+      fetchObblighi()
+      toast.success('Obbligo aggiunto.')
+    }
+    setSubmitting(false)
   }
 
   const toggleCompletato = async (id, completato) => {
-    await supabase.from('obblighi').update({ completato: !completato, completato_il: !completato ? new Date().toISOString() : null }).eq('id', id)
+    const { error } = await supabase.from('obblighi').update({ completato: !completato, completato_il: !completato ? new Date().toISOString() : null }).eq('id', id)
+    if (error) { toast.error('Errore durante l\'aggiornamento.'); return }
     fetchObblighi()
+    toast.success(completato ? 'Obbligo riaperto.' : 'Obbligo completato.')
   }
 
   const handleDelete = async (id) => {
-    if (confirm('Eliminare questo obbligo?')) {
-      await supabase.from('obblighi').delete().eq('id', id)
-      fetchObblighi()
+    if (!await confirm('Eliminare questo obbligo? L\'operazione è irreversibile.')) return
+    setObblighi(prev => prev.filter(o => o.id !== id))
+    const { error } = await supabase.from('obblighi').delete().eq('id', id)
+    if (error) {
+      await fetchObblighi()
+      toast.error('Eliminazione non riuscita.')
+      return
     }
+    toast.success('Obbligo eliminato.')
   }
 
   const filtered = obblighi.filter(o => {
@@ -92,6 +126,7 @@ export default function Obblighi() {
                 <div className="flex flex-wrap gap-3 mt-1.5 text-xs text-stone-400">
                   {o.assegnato_a && <span>📍 {o.assegnato_a}</span>}
                   <span>🔄 {ricorrenzaLabel[o.ricorrenza]}</span>
+                  {o.data_inizio && <span>📅 dal {format(new Date(o.data_inizio + 'T00:00:00'), 'd MMM yyyy', { locale: it })}{o.data_fine ? ` al ${format(new Date(o.data_fine + 'T00:00:00'), 'd MMM yyyy', { locale: it })}` : ''}</span>}
                   {o.completato_il && <span>✓ {format(new Date(o.completato_il), 'd MMM', { locale: it })}</span>}
                 </div>
               </div>
@@ -145,9 +180,25 @@ export default function Obblighi() {
                   {Object.entries({ giornaliera: 'Giornaliera', settimanale: 'Settimanale', mensile: 'Mensile', trimestrale: 'Trimestrale', annuale: 'Annuale', unica: 'Una tantum' }).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Data inizio</label>
+                  <input type="date" value={form.data_inizio} onChange={e => setForm(f => ({ ...f, data_inizio: e.target.value }))} className="input" />
+                </div>
+                <div>
+                  <label className="label">Data fine</label>
+                  <input type="date" value={form.data_fine} onChange={e => setForm(f => ({ ...f, data_fine: e.target.value }))} className="input" min={form.data_inizio || undefined} />
+                </div>
+              </div>
+              {errore && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{errore}</p>
+              )}
               <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowForm(false)} className="btn-secondary flex-1">Annulla</button>
-                <button type="submit" className="btn-primary flex-1">Salva</button>
+                <button type="button" onClick={() => { setShowForm(false); setErrore(null) }} disabled={submitting} className="btn-secondary flex-1">Annulla</button>
+                <button type="submit" disabled={submitting} className="btn-primary flex-1 flex items-center justify-center gap-2">
+                  {submitting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                  {submitting ? 'Salvataggio...' : 'Salva'}
+                </button>
               </div>
             </form>
           </div>

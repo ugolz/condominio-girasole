@@ -4,16 +4,22 @@ import { useProfile } from '../context/ProfileContext'
 import { Plus, Trash2, CheckCircle, Clock, AlertTriangle, Receipt } from 'lucide-react'
 import { format, isAfter, isBefore, differenceInDays } from 'date-fns'
 import { it } from 'date-fns/locale'
+import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmDialog'
 
 const CATEGORIE = ['Rate condominiali', 'Assicurazione', 'Revisione ascensore', 'Caldaia', 'Antincendio', 'Bollette', 'Tasse', 'Altro']
 
 export default function Scadenze() {
   const { unita, isAdmin, loading: profileLoading } = useProfile()
+  const toast = useToast()
+  const confirm = useConfirm()
   const [scadenze, setScadenze] = useState([])
   const [quoteSpese, setQuoteSpese] = useState([])
+  const [millesimi, setMillesimi] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadingQuote, setLoadingQuote] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [filtro, setFiltro] = useState('future')
   const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: 'Rate condominiali', data_scadenza: '', importo: '', completata: false })
 
@@ -21,8 +27,12 @@ export default function Scadenze() {
 
   useEffect(() => {
     if (!profileLoading) {
-      if (unita) fetchQuoteSpese()
-      else setLoadingQuote(false)
+      if (unita) {
+        fetchQuoteSpese()
+        fetchMillesimi()
+      } else {
+        setLoadingQuote(false)
+      }
     }
   }, [unita, profileLoading])
 
@@ -30,6 +40,15 @@ export default function Scadenze() {
     const { data } = await supabase.from('scadenze').select('*').order('data_scadenza')
     setScadenze(data || [])
     setLoading(false)
+  }
+
+  const fetchMillesimi = async () => {
+    const { data } = await supabase
+      .from('millesimi_config')
+      .select('valore')
+      .eq('unita', unita)
+      .single()
+    setMillesimi(data?.valore ?? null)
   }
 
   const fetchQuoteSpese = async () => {
@@ -53,17 +72,37 @@ export default function Scadenze() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (submitting) return
+    setSubmitting(true)
     const { error } = await supabase.from('scadenze').insert({ ...form, importo: form.importo ? parseFloat(form.importo) : null })
-    if (!error) { setShowForm(false); setForm({ titolo: '', descrizione: '', categoria: 'Rate condominiali', data_scadenza: '', importo: '', completata: false }); fetchScadenze() }
+    if (error) {
+      toast.error('Errore durante il salvataggio.')
+    } else {
+      setShowForm(false)
+      setForm({ titolo: '', descrizione: '', categoria: 'Rate condominiali', data_scadenza: '', importo: '', completata: false })
+      fetchScadenze()
+      toast.success('Scadenza aggiunta.')
+    }
+    setSubmitting(false)
   }
 
   const toggleCompletata = async (id, completata) => {
-    await supabase.from('scadenze').update({ completata: !completata }).eq('id', id)
+    const { error } = await supabase.from('scadenze').update({ completata: !completata }).eq('id', id)
+    if (error) { toast.error('Errore durante l\'aggiornamento.'); return }
     fetchScadenze()
+    toast.success(completata ? 'Scadenza riaperta.' : 'Scadenza completata.')
   }
 
   const handleDelete = async (id) => {
-    if (confirm('Eliminare questa scadenza?')) { await supabase.from('scadenze').delete().eq('id', id); fetchScadenze() }
+    if (!await confirm('Eliminare questa scadenza? L\'operazione è irreversibile.')) return
+    setScadenze(prev => prev.filter(s => s.id !== id))
+    const { error } = await supabase.from('scadenze').delete().eq('id', id)
+    if (error) {
+      await fetchScadenze()
+      toast.error('Eliminazione non riuscita.')
+      return
+    }
+    toast.success('Scadenza eliminata.')
   }
 
   const getStatus = (s) => {
@@ -146,7 +185,13 @@ export default function Scadenze() {
                   {s.descrizione && <p className="text-xs text-stone-400 mt-0.5">{s.descrizione}</p>}
                   <div className="flex flex-wrap gap-3 mt-1.5 text-xs text-stone-400">
                     <span>📅 {format(new Date(s.data_scadenza), 'd MMMM yyyy', { locale: it })}</span>
-                    {s.importo && <span>💶 €{s.importo.toLocaleString('it-IT')}</span>}
+                    {s.importo && <span>💶 Totale: €{s.importo.toLocaleString('it-IT')}</span>}
+                    {s.importo && millesimi && (
+                      <span className="text-stone-600 font-medium">
+                        🏠 Tua quota: €{(s.importo * millesimi / 1000).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                        <span className="font-normal text-stone-400 ml-1">({millesimi} mill.)</span>
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -258,8 +303,11 @@ export default function Scadenze() {
                 <textarea value={form.descrizione} onChange={e => setForm(f => ({ ...f, descrizione: e.target.value }))} className="input h-16 resize-none" />
               </div>
               <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowForm(false)} className="btn-secondary flex-1">Annulla</button>
-                <button type="submit" className="btn-primary flex-1">Salva</button>
+                <button type="button" onClick={() => setShowForm(false)} disabled={submitting} className="btn-secondary flex-1">Annulla</button>
+                <button type="submit" disabled={submitting} className="btn-primary flex-1 flex items-center justify-center gap-2">
+                  {submitting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                  {submitting ? 'Salvataggio...' : 'Salva'}
+                </button>
               </div>
             </form>
           </div>
